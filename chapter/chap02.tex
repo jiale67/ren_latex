@@ -1,0 +1,86 @@
+\chapter{机器人系统框架总体设计}
+\section{机器人功能需求分析}
+对于面向变电站辅助作业的运维机器人，为满足其特殊应用场景对可靠性、高性能的综合要求结合其工作内容，要求机器人具备以下功能：
+（1）具备环境感知模块，可通过传感器与周围环境进行信息交互，感知自身作业环境；
+（2）具备实时处理复杂空间信息的能力，实现高精度环境地图构建，以及在动态环境中的厘米级自我定位。
+（3）具备基于先验地图自主导航模块，导航过程中能够自主规划出从当前位置到目标点的最优全局路径。
+（4）具备任务执行过程中的未知障碍物规避能力，即在遵循全局路径的同时，实时感知并绕开未预见的障碍，并在必要时触发路径重规划机制以应对复杂的突发状况。
+\section{机器人系统方案设计}
+
+
+\section{机器人硬件平台架构}
+\subsection{硬件选型}
+机器人硬件结构包括传感器模块、中央控制模块、底层运动控制模块以及移动电源。传感器模块负责采集环境信息发送给中央控制器;
+中央控制器处理传感器数据，计算出机器人运动控制指令并发送给底层运动控制模块；底层电机和舵机接受控制指令驱动机器人一定速度运动或变换到指定位姿。
+
+传感器模块包括两部分：激光雷达和双目摄像头。3D激光雷达选用大疆览沃的MID-360，该激光雷达是4线束非重复扫描固态激光雷达，
+由于体积小、重量轻、视场较大、分辨率较高，因此被广泛部署使用在机器人、割草机、无人车、工业和教育等智能产品中。
+内部集成了IMU芯片（3轴加速度计和3轴陀螺仪），可结合点云数据构建高精地图并实现自主定位过程中的雷达坐标系、机器人坐标系、世界坐标系三者之间的转换关系。
+激光雷达具体尺寸图如图~\ref{fig:Mid-360具体尺寸}所示，其性能参数如表~\ref{tab:mid360_params_centered}所示。
+
+\begin{figure}[!htb]
+	\centering
+	\includegraphics[width=\textwidth]{pic/激光雷达具体尺寸.pdf}
+	\caption{激光雷达具体尺寸}
+	\label{fig:Mid-360具体尺寸}
+\end{figure}
+
+
+\begin{table}[htbp]
+  \centering
+  \caption{MID360激光雷达性能参数}
+  \label{tab:mid360_params_centered}
+  \renewcommand{\arraystretch}{1.5} % 增大行间距
+  \begin{tabularx}{\textwidth}{>{\centering\arraybackslash}X c c c c >{\centering\arraybackslash}X}
+      \toprule[1.2pt]
+      \textbf{项目} & \textbf{最小值} & \textbf{典型值} & \textbf{最大值} & \textbf{单位} & \textbf{备注} \\
+      \midrule
+      测距范围 & 0.1 & 10 & 40 & m & 100klux照度 \\
+      测距精度 & - & ±5 & - & cm & 90\%反射率 \\
+      水平视场角 & - & 360 & - & ° & 全向扫描 \\
+      垂直视场角 & -7.0 & - & 52.0 & ° & - \\
+      扫描模式 & - & 非重复扫描 & - & - & - \\
+      虚警率 & - & <0.01\% & - & - & 100klux照度 \\
+      工作温度 & -20 & - & 55 & °C & - \\
+      工作电压 & 9 & - & 27 & V DC & - \\
+      功耗 & - & 11 & - & W & 典型功耗 \\
+      网络接口 & - & 千兆以太网 & - & - & 支持PTP、PPS \\
+      \bottomrule[1.2pt]
+  \end{tabularx}
+\end{table}
+
+图像采集模块包含两个双目摄像头，选用奥比中光公司的Gemini335L型号的摄像头，输出深度图像和RGB图像。
+可用于目标检测、距离检测以及3D环境构建，本课题中双目摄像头主要用于移动机器人移动过程中对工作目标的识别。
+双目摄像头参数见表~\ref{tab:gemini335l_params_adjusted}所示。
+\begin{table}[h]
+  \centering
+  \caption{双目摄像头 Gemini335L 性能参数} 
+  \label{tab:gemini335l_params_adjusted}
+  \renewcommand{\arraystretch}{1.5} % 增大行间距
+  \begin{tabularx}{\textwidth}{>{\centering\arraybackslash}X >{\centering\arraybackslash}X}
+      \toprule[1.2pt] % 加粗顶线
+      \textbf{规格参数} & \textbf{数值} \\
+      \midrule
+      最大工作范围 & 0.17-20m \\
+      推荐工作范围 & 0.25-6m   \\
+      基线        & 95mm         \\
+      视场角      & 90°×65° @ 2m（1280×800）      \\
+      分辨率      & 1280×800 @ 60fps         \\
+      供电建议    & DC 5V \& $\geq$1.5A \\
+      平均功耗    & < 3W \\
+      工作温度    & -10-50°C \\
+      \bottomrule[1.2pt] % 加粗底线
+  \end{tabularx}
+\end{table}
+
+
+
+
+\subsection{硬件结构连接}
+
+
+
+\section{机器人软件系统架构}
+\section{本章小结}
+
+

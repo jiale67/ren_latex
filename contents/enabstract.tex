@@ -1,0 +1,15 @@
+
+%%%%%%%%%%%%%%%英文摘要%%%%%%%%%%%%
+
+\enabstract Substations are key nodes in the operation and maintenance of power systems. Their operating environments usually involve high voltage, strong electromagnetic interference, dense equipment layout, narrow passages, and dynamic obstacles. Traditional manual inspection and auxiliary operation methods have limitations in safety, real-time response, and operational efficiency. Introducing mobile robots with autonomous perception, localization, mapping, and path planning capabilities is therefore an important approach to improving the intelligence level of substation operation and maintenance. Focusing on the autonomous navigation requirements of robots in substation operation and maintenance scenarios, this thesis studies the design and implementation of a navigation system for a substation operation and maintenance robot.
+
+First, this thesis analyzes the functional requirements of the robot and designs a hardware platform composed of a sensing module, a central control module, a low-level motion control module, and a power supply module. A navigation framework is then constructed using sensors such as LiDAR and binocular cameras. On this basis, coordinate transformation and point cloud clustering methods required for robot navigation are introduced, providing a unified data representation foundation for subsequent environment perception, mapping, and path planning.
+
+Second, to meet the need for real-time obstacle perception in complex dynamic environments, this thesis designs a lightweight obstacle detection and tracking method based on the fusion of depth images and point cloud data. The method combines the results of a U-depth image detector and a DBSCAN point cloud detector, and improves detection robustness through bounding box matching and fusion. Feature-based data association, a constant-acceleration motion model, and a point cloud voting strategy are further introduced to estimate and identify dynamic obstacle states. For mapping, local occupancy grid updating and octree-based global map representation are adopted to provide updatable environmental constraints for the planner.
+
+Finally, considering the complex obstacle distribution and real-time collision avoidance requirements in substations, this thesis designs a hierarchical path planning method combining global and local planning. At the global level, the RRT algorithm is used to generate feasible paths, while map complexity evaluation, goal-biased sampling, and timeout fallback mechanisms are introduced to improve search efficiency and robustness. At the local level, model predictive control is adopted to track the global path and generate local trajectories under static and dynamic obstacle constraints. In addition, the controller design and the NeuPAN planner are discussed, providing a basis for further navigation optimization in non-convex obstacle environments and complex dynamic scenarios.
+
+\enkeyword{substation operation and maintenance, mobile robot, autonomous navigation, environment perception, path planning}
+
+
+	
