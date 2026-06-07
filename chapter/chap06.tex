@@ -1,39 +1,24 @@
-\chapter{路径规划算法}
-\section{引言}
-前文提出了自主移动机器人机载目标检测与跟踪算法，实现了障碍物分类、障碍物关联以及地图更新，帮助机器人实时准确获取到环境信息。本章将基于环境感知与地图构建结果提出一种适用于变电站移动机器人的路径规划算法。
+\chapter{分层路径规划与学习增强局部避障方法}
+\section{本章研究思路与总体框架}
+前文围绕变电站运维机器人导航系统中的环境感知、障碍物检测跟踪和地图更新问题展开研究，已经获得局部占用地图、障碍物包围盒、点云聚类边界以及动态障碍物状态估计等信息。上述结果为路径规划提供了可计算的环境约束。本章在此基础上，设计一种面向变电站复杂受限空间的分层路径规划方法，使机器人能够在全局连通性、局部避障安全性和底盘可执行性之间取得平衡。
 
-在复杂、结构化且安全性要求极高的变电站环境下，赋予机器人高效、鲁棒的自主移动能力是达成可靠运检任务的核心挑战，其中路径规划技术尤为关键。路径规划旨在为机器人从起点至目标点搜索一条满足无碰、高效、平滑且符合动力学约束的运动轨迹。其性能优劣直接影响机器人的任务执行效率、安全性，乃至整个智能运检系统的实用性。
-传统的单粒度路径规划策略试图一步到位地生成从起点到终点的完整路径，但其效率与精度存在矛盾。在高分辨率地图上搜索全局路径（如A*, Dijkstra）容易导致计算量爆炸性增长​​，实时性差。而在拓扑图或低分辨率栅格图上规划出的路径往往过于粗略，包含大段“开放空间”的指引，缺乏精确的避障和符合机器人动力学的细节，无法直接控制机器人执行，易导致碰撞或执行失败。不仅如此，采用单粒度路径规划其固定全局路径一旦生成，如果环境中出现未预料到的动态障碍物，机器人要么死板地尝试跟踪原路径导致碰撞风险，要么需要触发代价高昂的全局重规划。尤其在复杂大环境（如大型变电站）由于单粒度路径规划无法针对不同区域的特征和需求进行差异化
-处理，容易导致资源分配不均、规划效率低下等问题，难以满足实际应用中对机器人作业高效、精准的需求。
+变电站环境具有设备密集、通道狭窄、障碍物形态不规则和安全裕度要求高等特点。若仅采用单一粒度的规划策略，往往难以同时满足长距离搜索效率和局部避障精度。一方面，在高分辨率栅格地图上直接搜索从起点到终点的完整轨迹，会使A*、Dijkstra等图搜索方法面临较大的计算开销；另一方面，若只在低分辨率地图或拓扑图上生成粗略路径，则路径缺少对设备边界、动态障碍物和底盘运动约束的细致刻画，难以直接作为控制指令执行。当环境中出现临时作业人员、检修工具或移动设备时，固定全局路径还可能因局部遮挡而频繁触发全局重规划，影响系统实时性和运行稳定性。
 
-与传统单粒度路径规划相比，多粒度路径规划通过结合全局路径规划和局部路径规划，平衡了规划的灵活性和效率。全局路径规划基于区域的优先级、静态环境特征和任务需求，负责从起点到终点的整体规划。
-而局部路径规划则侧重于在动态环境中实时避障和路径调整，通过实时感知环境变化，灵活调整，从而增强机器人在复杂环境中的适应性和鲁棒性。
-因此，融合全局路径规划与局部路径规划的分层策略被广泛认为是一种行之有效的解决思路，尤其适用于变电站这类既包含大量固定复杂障碍物，又可能存在随机动态扰动的场景。
+针对上述问题，本文采用“全局拓扑引导 + 局部滚动优化 + 底层轨迹跟踪”的分层框架。全局规划层基于构建好的二维环境地图生成从起点到目标点的粗粒度可行路径，主要解决长距离拓扑连通问题；局部规划层以全局路径为参考，融合第4章输出的实时障碍信息和动态状态估计，在有限预测时域内生成满足运动约束、平滑约束和避障要求的局部轨迹；底层控制层将局部轨迹和首个最优控制量转化为全向移动底盘可执行的线速度与角速度指令。
 
-基于此，本章提出“RRT全局规划 + MPC局部规划”的移动机器人组合路径规划算法，全局规划器负责在已知（或构建好的）环境地图上，快速生成一条连接起点与目标的粗粒度可行路径，确保整体的拓扑连通性，为机器人提供宏观导航指引；局部规划器则以此全局路径为参考，结合高频率的实时传感器信息，精细生成满足动力学约束、平滑且避障的动态最优轨迹。
+本章提出的路径规划方法主要包括以下内容：
 
-本章的主要贡献如下：
+（1）设计面向变电站环境的RRT全局规划器。该规划器引入地图复杂度评价指标，在简单区域中采用直连路径降低计算开销，在复杂区域中采用目标偏向RRT搜索可行路径；同时加入线段碰撞检测、超时回退和路径平滑后验校验机制，提高全局规划的实时性和容错能力。
 
-（1）全局规划器设计，采用基于概率的RRT算法对地图进行采样生成连续折线段作为全局路径，对全局路径进行三次样条插值实现路径平滑。为提高路径规划的实时性，在全局规划过程中加入熔断机制，通过牺牲路径质量来换取规划效率。
+（2）构建学习增强MPC局部规划器。在传统包络约束MPC基础上，分析AABB包围盒与椭圆包络对非凸障碍物的保守性，进一步引入点级障碍表示和学习型距离特征，将复杂障碍物边界转化为可嵌入滚动优化的避障正则项，从而提升机器人在设备密集区和狭窄通道中的通行能力。
 
-（2）采用模型预测控制作为局部规划器，添加障碍物约束条件，依据全局路径和局部信息生成局部路径。
+（3）设计底层轨迹跟踪控制器。控制器采用前馈速度与PID反馈相结合的方式跟踪局部规划轨迹，并通过分层航向决策生成角速度指令，为后续仿真验证和实机部署提供统一控制接口。
 
-（3）过系统的仿真实验，深入分析了本文提出路径规划算法的有效性和性能优势。
+\section{面向全局拓扑引导的RRT规划器}
+\subsection{RRT采样规划原理}
+快速扩展随机树（Rapidly-exploring Random Tree, RRT）由LaValle提出\textsuperscript{\cite{LaValle1998RRT}}，是一类面向连续配置空间的采样式路径规划方法。与需要预先构建完整图结构的栅格搜索方法不同，RRT通过随机采样逐步扩展搜索树，能够在障碍物分布复杂或配置空间维度较高的场景中较快发现可行路径。需要指出的是，基础RRT具有概率完备性，即若可行路径存在，随着采样次数增加，算法找到可行解的概率趋近于1；但基础RRT并不保证路径最优性，其输出路径通常需要经过后处理平滑。
 
-\section{全局规划器实现}
-\subsection{RRT算法概述}
-快速扩展随机树（Rapidly-exploring Random Tree, RRT）算法由 Steven M. LaValle 于 1998 年提出，是一种专为解决高维配置空间下的路径规划问题而设计的概率完备算法。相较于传统图搜索算法（如A*、Dijkstra），RRT不需要预先构建完整的图结构，特别适应与环境障碍复杂、维度较高或存在动力学约束的规划场景。
-
-该算法的核心思想是：使用状态表示法$q = (x,y,\theta)$来描述机器人的位置和方向。首先，以机器人的初始状态
-$q_{init}$作为起点，初始化一棵随机树$T$。随后，在无障碍物的空间
-中随机选取一个点$q_{rand}$，紧接着利用特定的距离评估函数，在随机树$T$中查找距离$q_{rand}$
-最近的节点$q_{nearest}$。例如，如果使用欧几里得距离作为评估标准，$q_{nearest}$就是$T$中
-离$q_{rand}$最近的点。之后，从$q_{nearest}$出发，进行树生长，向$q_{rand}$方向前进一个固定步长，生成新的点$q_{new}$。
-如果从$q_{nearest}$到$q_{new}$的路径上没有障碍物，就将$q_{new}$添加到随机树$T$中，并连接$q_{nearest}$和$q_{new}$，作为树枝。
-如果有障碍物，则忽略$q_{new}$，不对树$T$做任何修改。这个过程不断重复，直到找
-到一个点与目标点$q_{goal}$的距离小于设定阈值或者采样次数达到上限时，算法将停止搜索。
-如果在这个过程中，树$T$中成功找到了$q_{goal}$，算法将利用回溯法找到从
-$q_{goal}$到$q_{init}$的路径，若未能找到，则算法返回失败。
+本文将移动机器人全局状态表示为$q=(x,y,\theta)$，其中$x$、$y$为机器人在地图坐标系中的位置，$\theta$为航向角。RRT搜索树记为$T=(V,E)$，节点集合$V$保存已探索的可行状态，边集合$E$保存节点之间的无碰连接关系。算法以初始状态$q_{init}$为根节点，在自由空间中采样$q_{rand}$，从树中查找距离$q_{rand}$最近的节点$q_{near}$，再沿$q_{near}$指向$q_{rand}$的方向扩展固定步长，得到新节点$q_{new}$。若$q_{near}$到$q_{new}$之间的连接段满足碰撞检测，则将$q_{new}$加入搜索树；否则舍弃该节点。该过程持续进行，直到新节点接近目标状态$q_{goal}$或达到搜索时间上限。
 
 \begin{figure}[!htb]
 	\centering
@@ -42,239 +27,559 @@ $q_{goal}$到$q_{init}$的路径，若未能找到，则算法返回失败。
 	\label{fig:RRT算法流程}
 \end{figure}
 
-RRT 算法是一种高效的路径规划方法，它通过牺牲部分算法的完备性以追求更快的计算效率，因此它是一种快速路径规划算法。该算法展现了对微分约束等复杂条件的适应性能力​​，并特别擅长于高维状态空间和多自由度系统的路径规划。不仅如此，RRT算法还具备在未知环境中进行随机采样的特性​​，展现出强大的探索能力，并且其运行无需依赖预先构建的环境模型​​，能够根据当前获得的实时信息开始搜索，并将探索范围覆盖到地图的任意区域。基于上述特性，RRT被视为一种概率完备算法​​，这使得它在处理高维复杂环境​​，特别是高自由度移动机器人进行路径规划时，​​具有显著优势。
+RRT适合本文全局规划层的原因在于：其一，变电站地图中存在大量结构化设备和不规则障碍物，采样式扩展可以减少对精细栅格离散的依赖；其二，全局层只需提供拓扑连通的参考路径，不要求直接输出可执行速度序列，因此RRT路径的折线特征可以由后续平滑和局部MPC进一步修正；其三，RRT搜索过程易于加入目标偏向、碰撞检测缓存和超时回退等工程机制，便于满足移动机器人在线运行的实时性要求。
 
-\subsection{全局规划器设计}
-对于结构简单环境，全局路径简单设计为一条起点指向终点的向量。在此过程中，全局路径只给机器人提供一个方向，对环境变化的响应均依靠局部感知,同时依靠局部规划器进行避障。考虑到变电站设备密集、移动机器人在进行路径规划时可能需要面对结构异构的复杂环境，采用RRT算法进行全局路径规划不需要有精细化地图，降低了对机器人搭载的传感器的要求，同时还可以避免对环境进行复杂建模。
+\subsection{地图复杂度评价与规划模式切换}
+在开阔或障碍稀疏区域，直接将起点与目标点连接为参考线段即可为局部规划器提供有效方向指引；在设备密集或通道狭窄区域，则需要启动RRT搜索以绕开静态障碍并保证拓扑可达性。为避免在简单区域中产生不必要的全局搜索开销，本文首先对输入地图$\mathcal{M}$进行复杂度评价，并根据评价结果选择直连模式或RRT模式。
 
-全局规划器算法伪代码见算法~\ref{alg:全局规划器实现}。首先计算当前输入地图$\mathcal{M}$的复杂度$\mathcal{C}_{\mathcal{M}}$，地图复杂度评判标准由障碍物密度、自由空间连通度和狭窄通道因子这三个维度构成：
+地图复杂度由障碍物密度、自由空间连通度和狭窄通道因子共同描述：
 \begin{equation}
-	\mathcal{C}_{\mathcal{M}} = {w_o} \cdot {{\cal D}_o} + {w_f} \cdot \left( {1 - {{\cal K}_f}} \right) + {w_n} \cdot {{\cal F}_n}
+	\mathcal{C}_{\mathcal{M}}
+	=
+	w_o \mathcal{D}_{o}
+	+
+	w_f \left(1-\mathcal{K}_{f}\right)
+	+
+	w_n \mathcal{F}_{n},
+	\quad
+	w_o+w_f+w_n=1.
+	\label{eq:地图复杂度}
 \end{equation}
+其中$\mathcal{D}_{o}$表示障碍物密度，定义为
 \begin{equation}
-	\mathcal{D}_{o} = \frac{1}{A} \iint_{\mathcal{M}} \mathbf{1}_{\text{obs}}(x,y)  dx  dy
+	\mathcal{D}_{o}
+	=
+	\frac{1}{A}
+	\iint_{\mathcal{M}}
+	\mathbf{1}_{\mathrm{obs}}(x,y)\,dx\,dy,
+	\label{eq:障碍物密度}
 \end{equation}
+$A$为地图面积，$\mathbf{1}_{\mathrm{obs}}(x,y)$为占用指示函数。$\mathcal{K}_{f}$表示自由空间连通度：
 \begin{equation}
-	\mathcal{K}_{f} = \frac{1}{K} \sum_{i=1}^{K} \frac{\operatorname{diam}\left( R_{i} \right)}{\operatorname{diam}(\mathcal{M})} \cdot e^{-\alpha s_i}
+	\mathcal{K}_{f}
+	=
+	\frac{1}{K}
+	\sum_{i=1}^{K}
+	\frac{\operatorname{diam}(R_i)}{\operatorname{diam}(\mathcal{M})}
+	e^{-\alpha s_i},
+	\label{eq:自由空间连通度}
 \end{equation}
+其中$K$为自由空间连通分量数量，$R_i$为第$i$个连通分量，$\operatorname{diam}(R_i)$表示该分量的最大直径，$s_i$为该分量内狭窄通道数量，$\alpha$为狭窄通道惩罚系数。$\mathcal{F}_{n}$表示狭窄通道因子：
 \begin{equation}
-	\mathcal{F}_{n} = \frac{1}{N} \sum_{\tau \in \mathcal{T}} \left[ 1 - \tanh \left( \frac{w_{\tau} - w_{\min}}{w_{\text{crit}} - w_{\min}} \right) \right]
+	\mathcal{F}_{n}
+	=
+	\frac{1}{|\mathcal{T}|}
+	\sum_{\tau\in\mathcal{T}}
+	\left[
+	1-\tanh
+	\left(
+	\frac{w_{\tau}-w_{\min}}{w_{\mathrm{crit}}-w_{\min}}
+	\right)
+	\right],
+	\label{eq:狭窄通道因子}
 \end{equation}
+其中$\mathcal{T}$为通道集合，$w_{\tau}$为通道$\tau$的最小宽度，$w_{\min}$为机器人考虑安全裕度后的最小可通行宽度，$w_{\mathrm{crit}}$为通道宽阔与否的临界阈值。当$\mathcal{C}_{\mathcal{M}}$小于阈值$\mathcal{C}_{th}$且起终点连线通过碰撞检测时，规划器采用直连模式；否则启动RRT全局搜索。
 
-其中，${\cal D}_o$表示障碍物密度，$A$是地图面积，$\mathbf{1}_{\text{obs}}(x,y)$是障碍物指示函数（障碍物区域为1，空闲区域为0）。
-$\mathcal{K}_{f}$是自由空间连通度，$K$是自由空间连通分量数量，$\operatorname{diam}\left( R_{i} \right)$是第$i$个连通分量的最大直径，$s_i$表示分量$R_i$中狭窄通道的数量，$\alpha$是惩罚因子。
-$\mathcal{F}_{n}$是狭窄通道因子，$\mathcal{T}$表示所有通道集合，$w_{\tau}$是通道$\tau$的最小宽度，$w_{\min}$是机器人最小可通过宽度，$w_{\text{crit}}$是临界宽度阈值。$w_o$、$w_f$、$w_n$为归一化参数。
-将当前地图复杂度与设定阈值作比较（第4行），若$\mathcal{C}_{\mathcal{M}}$小于设定阈值，则认为本次规划是简单规划，全局路径设定为起点指向终点的线段，路径容器中仅添加起点和终点（第5行）。否则启动复杂全局路径规划。
+这种模式切换机制使全局规划器具备自适应计算能力：在走廊、空旷设备间隔等简单区域中，系统将计算资源留给局部避障；在变压器支架、电缆沟边缘或多设备交汇区域中，系统则通过RRT显式寻找绕行通路，避免局部规划器缺少全局引导而陷入局部最优。
 
-复杂全局路径规划采用RRT地图采样策略，区别在于采用偏向采样策略而不是随机采样。每次采样时，有概率$p$直接采用目标点作为采样点，采样随机空间自由点的概率$1-p$。若$p$设为0.2，每5次迭代至少1次强制向目标扩张，树以20\%的概率直线延伸至目标方向。
-采用目标偏向策略后，收敛时间期望值计算如下：
+\subsection{目标偏向采样、碰撞检测与超时回退}
+基础RRT完全随机采样时探索能力较强，但在目标明确的导航任务中可能产生较多无效扩展。本文采用目标偏向采样策略：每次采样时，以概率$p_g$直接选取目标点$q_{goal}$作为采样点，以概率$1-p_g$在自由空间中均匀采样。该策略在保持$p_g<1$的条件下仍保留对自由空间的探索能力，同时提高搜索树向目标区域扩展的速度。其平均搜索时间可近似表示为
 \begin{equation}
-	E\left[ t \right] = \frac{{{t_{RRT}}}}{{1 + \alpha p}}\quad \alpha  \in [1.8,2.5]
+	E[t]
+	\approx
+	\frac{t_{\mathrm{RRT}}}{1+\gamma p_g},
+	\quad
+	\gamma>0,
+	\label{eq:目标偏向搜索时间}
 \end{equation}
-
-$t_{RRT}$是基础RRT算法的收敛时间，$\alpha$是收敛加速因子。上式表明，目标偏向采样在保持概率完备性的同时，可大大提升平均收敛速度。 ​
+其中$t_{\mathrm{RRT}}$为基础RRT的平均搜索时间，$\gamma$为与地图结构、步长和目标区域大小相关的经验加速因子。式~\ref{eq:目标偏向搜索时间}用于说明目标偏向采样的加速趋势，实际取值需结合地图规模和最大迭代次数调节。
 
 \begin{figure}[!htb]
 	\centering
 	\includegraphics[width=0.8\textwidth]{pic/RRT搜索示意.eps}
-	\caption{RRT算法搜索示意图}
+	\caption{RRT目标偏向搜索与碰撞检测示意}
 	\label{fig:RRT算法搜索示意图}
 \end{figure}
 
-产生新节点后触发碰撞检测机制，采用双层优化策略：在节点扩展阶段使用单点碰撞检测，在边连接阶段则采用更精确的线段碰撞检测（第11行）。如图~\ref{fig:RRT算法搜索示意图}，新产生的节点$x_{new}$与距离最近的树节点连线之间存在障碍物，故$x_{new}$不添加到树中。
-针对机器人实时系统需求，算法加入了超时回退机制和最近路径返回策略。当算法每一次迭代时，更新当前树中最接近目标终点的树节点（第19行），搜索结束后将从距离终点最近的节点开始回溯找到渐进收敛路径（第22行），
-而非简单的规划失败。这一容错设计极大提升了系统鲁棒性。若未检测到超时，则从返回的节点$x_{back}$开始回溯找到完整全局路径。
+碰撞检测采用“节点有效性 + 边有效性”的双层判定。节点有效性用于快速判断$q_{new}$是否落入障碍区域或膨胀占用区域；边有效性则沿$q_{near}$到$q_{new}$的线段按照安全分辨率$\Delta l$进行离散采样，检查连接段是否穿越障碍物。与仅检查新节点相比，线段碰撞检测能够避免树枝跨越细长障碍物或狭窄设备边缘，从而提高全局路径的安全性。
 
+为适应在线运行需求，本文在RRT中加入超时回退机制。搜索过程中持续记录距离目标最近的可行节点$q_{best}$。若在最大搜索时间$t_{\max}$内找到满足$\|q_{new}-q_{goal}\|<d_R$的节点，则从该节点回溯得到完整路径；若搜索超时但已经存在$q_{best}$，则从$q_{best}$回溯得到一条向目标渐进的部分路径，并交由局部规划器继续跟踪或触发下一周期全局重规划；若搜索树未能产生有效扩展，则返回规划失败并输出停车指令。与简单返回失败相比，该机制能够在局部地图短时不完整或障碍物临时遮挡目标通路时保持系统响应。
 
 \begin{algorithm}[H]
-    \SetAlgoNoEnd % 禁用所有end标记
-    \KwIn{起点 $x_{init}$，终点 $x_{goal}$，地图 $\mathcal{M}$}
-    \KwOut{全局规划路径 $Path$} 
-    初始化搜索树 $Tree$，搜索步长 $Q$，地图复杂度阈值 $\mathcal{C}$ \\
-    $\mathit{timeout} \gets false$，$t \gets 0$，$t_{\max} \gets$最大搜索时间 \\
-    $\mathit{nearestDis} \gets \infty$，$\mathit{nearestPoint} \gets null$ \\
-    Calculate $\mathcal{C}_{\mathcal{M}}$
-    
-    \uIf{$\mathcal{C}_{\mathcal{M}} < \mathcal{C}$}{
-        $Path \gets \{ x_{init}, x_{goal} \}$
-    }   
-    {
-        \While{$t < t_{\max}$}{
-            $x_{rand} \gets ChooseTarget(x_{rand}, x_{goal}, P)$ \tcp{概率采样}
-            $x_{near} \gets Near(x_{rand}, Tree)$ \tcp{最近邻搜索}
-            $x_{new} \gets Steer(x_{near}, x_{rand}, Q)$ \tcp{步进扩展}
-            $E_i \gets (x_{near}, x_{new})$
-            
-            \uIf{$CollisionFree(\mathcal{M}, E_i)$}{
-                $Tree.addNode(x_{new})$ 
-                $Tree.addEdge(E_i)$ \tcp{更新树}
-                
-                \uIf{$\|x_{new} - x_{goal}\| < d_R$}{
-                    $\mathit{timeout} \gets false$ \\
-                    $x_{back} \gets x_{new}$ \\
+    \SetAlgoNoEnd
+    \KwIn{起点$x_{init}$，目标点$x_{goal}$，地图$\mathcal{M}$}
+    \KwOut{全局参考路径$Path_g$，规划状态$\mathit{status}$}
+    初始化搜索树$Tree$，扩展步长$Q$，目标偏向概率$p_g$，最大搜索时间$t_{\max}$\\
+    $q_{best}\gets x_{init}$，$d_{best}\gets \|x_{init}-x_{goal}\|$，$\mathit{status}\gets failure$\\
+    计算地图复杂度$\mathcal{C}_{\mathcal{M}}$\\
+    \uIf{$\mathcal{C}_{\mathcal{M}}<\mathcal{C}_{th}$ \textbf{and} $CollisionFree(\mathcal{M},x_{init},x_{goal})$}{
+        $Path_g\gets\{x_{init},x_{goal}\}$，$\mathit{status}\gets success$
+    }
+    \Else{
+        \While{未超过$t_{\max}$}{
+            $x_{rand}\gets SampleFree(\mathcal{M},x_{goal},p_g)$\\
+            $x_{near}\gets Nearest(Tree,x_{rand})$\\
+            $x_{new}\gets Steer(x_{near},x_{rand},Q)$\\
+            \If{$NodeFree(\mathcal{M},x_{new})$ \textbf{and} $EdgeFree(\mathcal{M},x_{near},x_{new})$}{
+                $Tree.addNode(x_{new})$，$Tree.addEdge(x_{near},x_{new})$\\
+                \If{$\|x_{new}-x_{goal}\|<d_{best}$}{
+                    $q_{best}\gets x_{new}$，$d_{best}\gets \|x_{new}-x_{goal}\|$
+                }
+                \If{$d_{best}<d_R$ \textbf{and} $EdgeFree(\mathcal{M},q_{best},x_{goal})$}{
+                    $Tree.addNode(x_{goal})$，$Tree.addEdge(q_{best},x_{goal})$\\
+                    $q_{best}\gets x_{goal}$，$\mathit{status}\gets success$\\
                     \textbf{break}
                 }
-                \uElseIf{$\|x_{new} - x_{goal}\| < \mathit{nearestDis}$}{
-                    $\mathit{nearestDis} \gets \|x_{new} - x_{goal}\|$ \\
-                    $\mathit{nearestPoint} \gets x_{new}$
-                }
             }
-            $t \gets t + \Delta t$
         }
-        \uIf{$\mathit{timeout}$}{
-            $Path \gets backtrace(nearestPoint, x_{init})$
+        \uIf{$\mathit{status}=success$}{
+            $Path_g\gets BackTrace(Tree,q_{best},x_{init})$
+        }
+        \ElseIf{$q_{best}\ne x_{init}$}{
+            $Path_g\gets BackTrace(Tree,q_{best},x_{init})$，$\mathit{status}\gets fallback$
         }
         \Else{
-            $Path \gets backtrace(x_{back}, x_{init})$
+            $Path_g\gets\emptyset$
         }
     }
-    $Path \gets PolyTraj(Path, \mathcal{M})$ \tcp{多项式轨迹优化}
-    \Return{$Path$}
-    \caption{全局规划器实现}
+    $Path_g\gets SmoothAndCheck(Path_g,\mathcal{M})$\\
+    \Return{$Path_g,\mathit{status}$}
+    \caption{目标偏向RRT全局规划器}
     \label{alg:全局规划器实现}
 \end{algorithm}
 
+\subsection{路径回溯与平滑化处理}
+RRT回溯得到的原始路径通常由若干折线段组成，存在折角较大、曲率不连续和局部冗余节点等问题。若直接将该路径作为局部规划参考，MPC需要频繁调整参考航向和速度，可能造成轨迹抖动。因此，本文对全局路径进行两级后处理。
 
-\section{局部规划器设计及其实现}
-\subsection{MPC控制的基本原理}
-模型预测控制（Model Predictive Control, MPC）是一种基于系统先验模型的先进控制策略。该算法通过构建当前系统状态与未来控制输入之间的映射关系，预测系统输出轨迹，并在每个采样时刻求解带约束的优化问题，动态优化控制序列以实现高精度控制目标。MPC的核心架构包含三个关键环节：系统行为预测、滚动时域优化和实时反馈校正。
+首先执行冗余节点裁剪。对于路径中的连续节点$x_i$、$x_{i+1}$和$x_j$，若$x_i$与$x_j$之间的线段通过碰撞检测，则删除中间冗余节点。该步骤能够减少由随机树扩展带来的锯齿形路径。其次，对裁剪后的路径进行三次样条插值，生成连续参考曲线：
+\begin{equation}
+	\mathbf{r}_g(\xi)
+	=
+	\left[x_g(\xi),y_g(\xi)\right]^{\mathrm{T}},
+	\quad
+	\xi\in[0,1],
+	\label{eq:全局样条路径}
+\end{equation}
+并按照固定弧长间隔重新采样，得到供局部规划器使用的参考点序列。为防止平滑曲线穿越障碍物，系统在插值后再次进行碰撞检测；若平滑曲线局部不可行，则保留该段原始折线或降低插值跨度。由此得到的全局路径既保留RRT搜索得到的拓扑连通性，又具备更好的连续性和可跟踪性。
 
-系统行为预测作为算法基础，依据被控对象的动态特性建立状态空间方程，根据实时状态量和未来控制输入序列推演系统输出变化。在移动机器人轨迹跟踪控制领域，通常采用非线性机器人动力学模型进行输出预测以保证物理真实性。
-滚动时域优化过程体现MPC的核心迭代特性，在每个控制周期内，算法基于实时系统状态和预测模型，推导未来有限时域内的输出轨迹，并构造包含跟踪精度、控制平滑性等目标函数的优化问题。通过在线求解该约束优化问题生成最优控制序列，仅实施首项控制量后即进入下一轮优化循环。这种有限时域在线优化策略显著区别于传统控制方法的一次性全局优化框架。
-为增强系统鲁棒性，MPC引入闭环反馈校正机制。针对模型失配、环境干扰等因素导致的预测偏差，算法在每步采样周期内对比实际输出与预测值，基于误差信息修正预测模型参数或补偿输出偏差。该反馈环节确保控制策略在不确定性环境中保持稳定性，有效抑制累积误差。
+\section{面向局部避障的学习增强MPC规划器}
+\subsection{滚动优化框架与底盘运动模型}
+模型预测控制（Model Predictive Control, MPC）是一种基于系统模型进行在线滚动优化的控制方法。与仅根据当前误差计算控制量的反馈控制不同，MPC在每个控制周期内预测未来有限时域中的状态序列，并在路径跟踪、控制平滑、运动约束和避障约束之间进行联合优化。优化得到的控制序列只执行首个控制量，随后利用新的定位与感知结果重新构造优化问题。该“预测--优化--执行--反馈”机制适合处理移动机器人局部规划中的动态避障和轨迹跟踪问题。
 
 \begin{figure}[!htb]
 	\centering
 	\includegraphics[width=1.0\textwidth]{pic/模型预测原理框图.eps}
-	\caption{模型预测原理框图}
+	\caption{模型预测控制滚动优化原理}
 	\label{fig:模型预测原理框图}
 \end{figure}
-模型预测控制系统由三个核心组件构成：MPC控制器、被控对象及状态估计器（系统架构如图~\ref{fig:模型预测原理框图}所示）。其工作流程遵循闭环优化机制：在每个采样时刻，MPC控制器基于预设的预测模型，在满足系统约束条件下求解目标函数的最优值，通过内置最优化求解器生成当前时刻的最优控制序列${u^*}(t)$；该控制序列的首项指令实时输出至被控对象执行动态响应；执行完毕后，被控对象将实际状态量$x(t)$反馈至状态估计器；状态估计器通过卡尔曼滤波等算法对系统状态进行观测校正，并将更新后的状态估计值 
-重新输入MPC控制器，触发下一周期的滚动优化求解。上述过程形成闭环迭代，直至达到预定控制目标。
 
-\subsection{局部轨迹生成}
-移动机器人局部规划须遵循全局路径来进行导航，同时避免与${{\rm{R}}^3}$空间中的静态和动态障碍物发生碰撞。故可以将安全导航定义为无碰撞通行，并以最小化碰撞为目标。构建机器人系统线性动力学模型如下：
+在本文系统中，局部规划器一方面接收RRT全局路径作为参考轨迹，另一方面接收第4章输出的局部地图、点云聚类边界、包围盒和动态障碍物状态估计。其总体结构如图~\ref{fig:学习增强MPC局部规划器总体架构}所示。该结构并非完全依赖端到端学习输出控制指令，而是在可解释的MPC框架内引入学习型距离特征，使规划器既能保持运动约束和安全约束的可控性，又能更充分地利用点云边界信息。
+
+\begin{figure}[!htb]
+	\centering
+	\includegraphics[width=1.0\textwidth]{pic/学习增强MPC局部规划架构图.pdf}
+	\caption{学习增强MPC局部规划器总体架构}
+	\label{fig:学习增强MPC局部规划器总体架构}
+\end{figure}
+
+考虑本文机器人采用全向移动底盘，局部规划状态定义为
 \begin{equation}
-	\left[ \begin{matrix}
-		\mathbf{p}_{k} \\
-		\mathbf{v}_{k}
-		\end{matrix} \right] 
-		= 
-		\left[ \begin{matrix}
-		I & \Delta tI \\
-		0 & I
-		\end{matrix} \right]
-		\left[ \begin{matrix}
-		\mathbf{p}_{k-1} \\
-		\mathbf{v}_{k-1}
-		\end{matrix} \right]
-		+ 
-		\left[ \begin{matrix}
-		\frac{1}{2}\Delta t^{2}I \\
-		\Delta tI
-		\end{matrix} \right]
-		\mathbf{a}_{k-1}
+	\mathbf{s}_{k}
+	=
+	\left[x_k,y_k,\theta_k\right]^{\mathrm{T}},
+	\label{eq:局部规划状态定义}
 \end{equation}
+其中$x_k$、$y_k$为地图坐标系下的位置，$\theta_k$为航向角。控制量定义为
+\begin{equation}
+	\mathbf{u}_{k}
+	=
+	\left[v_{x,k},v_{y,k},\omega_k\right]^{\mathrm{T}},
+	\label{eq:局部规划控制定义}
+\end{equation}
+其中$v_{x,k}$、$v_{y,k}$为地图坐标系下的平移速度，$\omega_k$为角速度。在采样周期$\Delta t$内，离散运动模型为
+\begin{equation}
+	\mathbf{s}_{k+1}
+	=
+	f(\mathbf{s}_k,\mathbf{u}_k)
+	=
+	\begin{bmatrix}
+		x_k+v_{x,k}\Delta t\\
+		y_k+v_{y,k}\Delta t\\
+		\theta_k+\omega_k\Delta t
+	\end{bmatrix}.
+	\label{eq:全向底盘离散运动模型}
+\end{equation}
+为了统一表示不同底盘形式，并便于在滚动优化中处理局部非线性项，可在上一轮名义状态$\bar{\mathbf{s}}_k$和名义控制$\bar{\mathbf{u}}_k$附近对模型进行局部线性化：
+\begin{equation}
+	\mathbf{s}_{k+1}
+	=
+	A_k\mathbf{s}_k+B_k\mathbf{u}_k+\mathbf{c}_k,
+	\label{eq:局部线性化模型}
+\end{equation}
+其中$A_k$、$B_k$和$\mathbf{c}_k$分别为线性化后的状态矩阵、控制矩阵和偏置项。对于本文全向底盘，式~\ref{eq:全向底盘离散运动模型}已具有线性形式；对于差速或阿克曼底盘，式~\ref{eq:局部线性化模型}仍可作为统一优化接口。
 
-其中$I$为3x3单位矩阵，$\Delta t$为定义的时间步长，${\bf{p}},{\bf{v}},{\bf{a}} \in {{\rm{R}}^3}$分别表示位置，速度，加速度。
-使用模型预测控制方法生成局部轨迹以避免碰撞，将整个优化问题表述为：
-\begin{align}
-	\min _{\mathbf{x}_{0: N}, \mathbf{u}_{0: N-1}} 
-	& \sum_{k=0}^{N} \left\| \mathbf{x}_{k} - \mathbf{x}_{k}^{\mathrm{ref}} \right\|^{2} 
-	+ \sum_{k=0}^{N-1} \lambda_{\mathbf{u}} \left\| \mathbf{u}_{k} \right\|^{2}, \\
-	\text{s.t.} \quad 
-	& \mathbf{x}_{0} = \mathbf{x}(t_{0}), \\
-	& \mathbf{x}_{k} = f(\mathbf{x}_{k-1}, \mathbf{u}_{k-1}), \\
-	& \mathbf{u}_{\min} \leq \mathbf{u}_{k} \leq \mathbf{u}_{\max}, \\
-	& \mathbf{x}_{k} \notin C_{i}, \quad \forall i \in S_{o}^{\text{static}} \cup S_{o}^{\text{dynamic}}, \\
-	& \forall k \in \{ 0, \ldots, N\},
-\end{align}
+\subsection{包络约束MPC的保守性分析}
+第4章已经完成障碍物检测、跟踪和地图更新。实时障碍物由深度图像检测器和点云聚类检测器融合得到包围盒，动态障碍物进一步通过数据关联和恒加速度模型获得状态估计。从工程接口角度看，最直接的局部避障方式是将AABB包围盒或旋转包围盒转化为MPC中的几何约束。
 
-其中，${{\bf{x}}_k} = {[{{\bf{p}}_k},{{\bf{v}}_k}]^{\rm{T}}}$表示机器人状态，包含机器人位置向量和速度向量；$\mathbf{u}_{k}$表示控制输入，为加速度向量。
-式4-7为优化目标函数，由两项构成，表示最小化预测轨迹和目标轨迹之间的偏差以及最小化控制输入，其中，$\mathbf{x}_{k}^{\mathrm{ref}}$表示期望机器人状态，具体由全局路径中距离当前机器人位置最近的点向前采样$N$个时间步长的状态序列构成。
-4-8为初始状态约束，4-9满足上述移动机器人动力学模型，4-10表示控制输入限幅。
-
-4-11为碰撞约束，确保机器人避免与静态和动态障碍物碰撞。其中静态障碍物包括先验地图中已知的静态障碍物和实时检测出新的静态障碍物。
-对于先验地图中已知的静态障碍物，采用占用体素表示在地图中，限制全局路径和局部路径采样这些被占据的体素。
-对于机载检测器实时检测到的障碍物轴对齐的3D包围盒，先通过迭代应用k-means++对这些包围盒的边界框进行细化，从框角处的两个质心开始，
-保留那些每个框内的点云密度超过指定阈值的包围盒。然后，离散地调整每个包围盒的2D方向角$\phi$ ，使内部点云密度最大化。
-最后，对于分类的动态障碍物包围盒$S_{o}$，通过状态转移预测其未来一段时间的运动轨迹：
-\begin{align}
-	{S_{k + \tau }} = {F^\tau }{\hat S_k}
-\end{align}
-\begin{align}
-	F = \begin{bmatrix}
-		1 & 0 & \delta t & 0 & \frac{\delta t^2}{2} & 0 \\
-		0 & 1 & 0 & \delta t & 0 & \frac{\delta t^2}{2}\\
-		0 & 0 & 1 & 0 & \delta t & 0\\
-		0 & 0 & 0 & 1 & 0 & \delta t\\
+设第$j$个障碍物在预测步$k$的中心为$\mathbf{o}_{j,k}=[x_{j,k},y_{j,k}]^{\mathrm{T}}$，包络椭圆长短轴半径分别为$a_j$和$b_j$，方向角为$\phi_j$。机器人相对障碍物中心的位置为$\Delta\mathbf{p}_{j,k}=[x_k-x_{j,k},y_k-y_{j,k}]^{\mathrm{T}}$，旋转矩阵为
+\begin{equation}
+	R(\phi_j)
+	=
+	\begin{bmatrix}
+		\cos\phi_j & -\sin\phi_j\\
+		\sin\phi_j & \cos\phi_j
+	\end{bmatrix}.
+	\label{eq:障碍物旋转矩阵}
+\end{equation}
+则椭圆包络避障约束可写为
+\begin{equation}
+	\left\|
+	\begin{bmatrix}
+		1/a_j & 0\\
+		0 & 1/b_j
+	\end{bmatrix}
+	R(\phi_j)^{\mathrm{T}}
+	\Delta\mathbf{p}_{j,k}
+	\right\|_2
+	\geq
+	1+\delta_s,
+	\label{eq:椭圆包络避障约束}
+\end{equation}
+其中$\delta_s$为安全裕度。对于动态障碍物，可利用第4章得到的状态估计$\hat{\mathbf{S}}_j(t)$进行短时预测：
+\begin{equation}
+	\mathbf{S}_{j,k+\tau}
+	=
+	F^{\tau}\hat{\mathbf{S}}_j(t),
+	\label{eq:动态障碍物状态预测}
+\end{equation}
+\begin{equation}
+	F
+	=
+	\begin{bmatrix}
+		1 & 0 & \Delta t & 0 & \frac{1}{2}\Delta t^2 & 0\\
+		0 & 1 & 0 & \Delta t & 0 & \frac{1}{2}\Delta t^2\\
+		0 & 0 & 1 & 0 & \Delta t & 0\\
+		0 & 0 & 0 & 1 & 0 & \Delta t\\
 		0 & 0 & 0 & 0 & 1 & 0\\
 		0 & 0 & 0 & 0 & 0 & 1
-		\end{bmatrix}
-\end{align}
+	\end{bmatrix}.
+	\label{eq:恒加速度状态转移矩阵}
+\end{equation}
+式~\ref{eq:动态障碍物状态预测}和式~\ref{eq:恒加速度状态转移矩阵}分别表示动态障碍物在恒加速度模型下的预测状态和状态转移矩阵，状态量可包含二维位置、速度和加速度。
 
-$\tau  \in \{ 0, \ldots ,N\}$为预测步长，$F$是加速度模型下的状态转移矩阵。获得静态障碍物包围盒和动态障碍物预测包围盒后，使用旋转椭球体的空间几何关系将每个障碍物的碰撞约束表示为：
+包络约束具有实现简单、接口清晰的优点，但在变电站复杂场景下存在明显保守性。首先，变压器支架、电缆沟边缘、检修设备和临时工具常具有非凸或细长结构，若统一使用AABB或椭圆包络，会把真实可通行区域错误归入障碍区域。其次，检测误差、包围盒融合误差和动态预测误差会在“检测--包络--约束”链路中逐层传播，MPC为了保证安全往往需要增大$\delta_s$，进一步压缩可行空间。最后，在设备密集区域显式维护多个包络体约束会提高优化规模，容易导致局部轨迹绕行、停滞或频繁重规划。
 
+\begin{figure}[!htb]
+	\centering
+	\includegraphics[width=0.95\textwidth]{pic/包络约束与点级表示对比图.pdf}
+	\caption{包络约束与点级障碍表示对比}
+	\label{fig:包络约束与点级表示对比}
+\end{figure}
+
+如图~\ref{fig:包络约束与点级表示对比}所示，传统包络约束会把非凸障碍物内部的部分可行空间一并排除，而点级表示直接保留障碍物边界点及局部分离方向。因此，本文在保留包围盒结果作为稳定工程接口的同时，引入点级障碍表示与学习型距离特征：对规则、稀疏障碍物可采用包络约束快速处理；对非凸、密集或边界形态复杂的障碍物，则直接利用边界点构造局部避障正则。
+
+\subsection{点级障碍表示与动态预测点流}
+为了使局部规划器能够直接利用感知结果，本文将局部障碍信息统一表示为二维点集：
+\begin{equation}
+	\mathcal{P}_{t}
+	=
+	\left\{\mathbf{p}_{t}^{1},\mathbf{p}_{t}^{2},\ldots,\mathbf{p}_{t}^{M}\right\},
+	\quad
+	\mathbf{p}_{t}^{i}\in\mathbb{R}^{2},
+	\label{eq:障碍点集定义}
+\end{equation}
+其中$M$为当前局部感知范围内的障碍点数量。点集$\mathcal{P}_{t}$由三类数据共同生成：激光雷达或深度相机获得的有效地面投影点、DBSCAN聚类后保留的障碍物边界点，以及由AABB或旋转包围盒边界采样得到的结构化障碍点。通过这种统一表达，第4章中的包围盒检测结果不会被舍弃，而是被转换为点级约束输入。
+
+对于已估计速度的动态障碍点，在MPC预测时域内构造预测点流：
+\begin{equation}
+	\mathbf{p}_{k|t}^{i}
+	=
+	\mathbf{p}_{t}^{i}
+	+
+	k\Delta t\,\mathbf{v}_{t}^{i},
+	\quad
+	k=0,1,\ldots,N,
+	\label{eq:预测点流}
+\end{equation}
+其中$\mathbf{v}_{t}^{i}$为第$i$个障碍点或其所属目标在时刻$t$的估计速度。对于无法可靠估计速度的静态障碍点，令$\mathbf{v}_{t}^{i}=\mathbf{0}$。由于点级输入数量可能较大，本文依据感知距离、点云密度、机器人前方扇区和与全局参考路径的相关性进行下采样，优先保留距离近、位于参考路径附近且可能影响当前避障决策的点。
+
+在预测步$k$，障碍点需要从地图坐标系变换到机器人局部坐标系。设机器人平移向量为$\mathbf{r}(\mathbf{s}_k)=[x_k,y_k]^{\mathrm{T}}$，航向旋转矩阵为$R(\theta_k)$，则第$i$个障碍点在机器人坐标系下的位置为
+\begin{equation}
+	\bar{\mathbf{p}}_{k|t}^{i}
+	=
+	R(\theta_k)^{\mathrm{T}}
+	\left(
+	\mathbf{p}_{k|t}^{i}
+	-
+	\mathbf{r}(\mathbf{s}_k)
+	\right).
+	\label{eq:障碍点坐标变换}
+\end{equation}
+式~\ref{eq:障碍点坐标变换}体现了局部规划中的感知与运动耦合关系：同一障碍点在地图坐标系中位置固定，但其在机器人局部坐标系中的相对位置会随预测位姿变化而变化。因此，避障代价应随预测轨迹同步更新，而不能只由当前点云的静态分布决定。
+
+\subsection{学习型距离特征与避障正则}
+若直接对每个障碍点计算机器人轮廓到点的精确距离，需要在每个预测步求解大量点到凸多边形的距离优化问题。对于设备密集的变电站场景，障碍点数量$M$和预测时域长度$N$的乘积较大，直接计算会显著增加MPC在线负担。为此，本文借鉴直接点机器人导航与端到端模型化学习研究中的思想\textsuperscript{\cite{han2025directpoint}}，设计学习型距离特征模块，将高维障碍点输入编码为可供MPC快速使用的距离和分离方向特征。
+
+设机器人在自身坐标系下的占用轮廓可表示为凸多边形集合：
+\begin{equation}
+	\mathcal{C}_{r}
+	=
+	\left\{
+	\mathbf{z}\in\mathbb{R}^{2}
+	\mid
+	G\mathbf{z}\leq\mathbf{h}
+	\right\},
+	\label{eq:机器人凸轮廓}
+\end{equation}
+其中$G$和$\mathbf{h}$由机器人底盘几何尺寸确定。对于任意局部障碍点$\bar{\mathbf{p}}_{k|t}^{i}$，机器人轮廓到该点的精确距离为
+\begin{equation}
+	d_{k,i}^{\star}
+	=
+	\min_{\mathbf{z}\in\mathcal{C}_{r}}
+	\left\|
+	\mathbf{z}
+	-
+	\bar{\mathbf{p}}_{k|t}^{i}
+	\right\|_2.
+	\label{eq:点到机器人轮廓距离}
+\end{equation}
+本文将该距离计算转化为离线学习、在线推理的形式。构造参数为$\Theta$的距离特征编码器$\Phi_{\Theta}(\cdot)$，输入为障碍点在机器人坐标系下的位置和机器人轮廓参数，输出为距离估计、边界匹配特征和局部分离方向：
+\begin{equation}
+	\left(
+	\hat d_{k,i},
+	\boldsymbol{\mu}_{k,i},
+	\boldsymbol{\lambda}_{k,i}
+	\right)
+	=
+	\Phi_{\Theta}
+	\left(
+	\bar{\mathbf{p}}_{k|t}^{i};G,\mathbf{h}
+	\right).
+	\label{eq:潜在距离特征编码}
+\end{equation}
+其中$\hat d_{k,i}$近似表示障碍点到机器人轮廓的距离，$\boldsymbol{\mu}_{k,i}$描述障碍点与机器人轮廓边界的匹配关系，$\boldsymbol{\lambda}_{k,i}$描述使机器人远离该点的局部分离方向。直观上，当障碍点靠近机器人某一条边或某个角点时，$\boldsymbol{\mu}_{k,i}$会在对应边界维度上产生较大响应，$\boldsymbol{\lambda}_{k,i}$则提供局部避障法向。
+
+距离特征编码器的训练不依赖具体变电站地图，而主要依赖机器人几何尺寸。离线阶段，在机器人局部坐标系的有效感知范围内随机采样训练点，利用式~\ref{eq:点到机器人轮廓距离}或其对偶形式求取精确距离及几何特征，再构造监督损失：
+\begin{equation}
+	\mathcal{L}_{d}
+	=
+	\frac{1}{N_s}
+	\sum_{i=1}^{N_s}
+	\left(
+	\left\|
+	\hat d_i-d_i^{\star}
+	\right\|_2^2
+	+
+	\beta_{\mu}
+	\left\|
+	\hat{\boldsymbol{\mu}}_i-\boldsymbol{\mu}_i^{\star}
+	\right\|_2^2
+	+
+	\beta_{\lambda}
+	\left\|
+	\hat{\boldsymbol{\lambda}}_i-\boldsymbol{\lambda}_i^{\star}
+	\right\|_2^2
+	\right),
+	\label{eq:距离编码器损失}
+\end{equation}
+其中$N_s$为训练样本数量，$d_i^{\star}$、$\boldsymbol{\mu}_i^{\star}$和$\boldsymbol{\lambda}_i^{\star}$为精确计算得到的监督量，$\beta_{\mu}$和$\beta_{\lambda}$为权重系数。由于训练样本由机器人几何和局部采样点生成，当机器人尺寸不变时，训练后的编码器可迁移到不同变电站区域。
+
+\subsection{优化模型与在线求解流程}
+基于上述点级距离特征，局部规划问题可构造为学习增强MPC。设预测时域长度为$N$，参考状态序列$\mathbf{s}_{k}^{\mathrm{ref}}$由RRT全局路径中距离当前机器人最近的路径点向前重采样获得，参考控制$\mathbf{u}_{k}^{\mathrm{ref}}$由参考路径切向方向和平滑速度规划得到。优化变量包括预测状态序列$\mathbf{s}_{0:N}$、控制序列$\mathbf{u}_{0:N-1}$和自适应安全距离$d_{0:N-1}$。目标函数为
 \begin{align}
-	\frac{{{{(x\cos \phi  + y\sin \phi )}^2}}}{{{a^2}}} + \frac{{{{( - x\sin \phi  + y\cos \phi )}^2}}}{{{b^2}}} + \frac{{{z^2}}}{{{c^2}}} \ge 1
+	\min_{\mathbf{s}_{0:N},\mathbf{u}_{0:N-1},d_{0:N-1}}
+	J
+	=&
+	\sum_{k=0}^{N}
+	\left\|
+	Q_s
+	\left(
+	\mathbf{s}_{k}-\mathbf{s}_{k}^{\mathrm{ref}}
+	\right)
+	\right\|_2^2
+	+
+	\sum_{k=0}^{N-1}
+	\left\|
+	Q_u
+	\left(
+	\mathbf{u}_{k}-\mathbf{u}_{k}^{\mathrm{ref}}
+	\right)
+	\right\|_2^2
+	\nonumber\\
+	&+
+	\sum_{k=1}^{N-1}
+	\left\|
+	Q_{\Delta u}
+	\left(
+	\mathbf{u}_{k}-\mathbf{u}_{k-1}
+	\right)
+	\right\|_2^2
+	+
+	\rho_o
+	\sum_{k=0}^{N-1}
+	\sum_{i\in\mathcal{I}_{k}}
+	\left[\min(I_{k,i},0)\right]^2
+	-
+	\eta
+	\sum_{k=0}^{N-1}d_k ,
+	\label{eq:学习增强MPC目标函数}
 \end{align}
+其中$Q_s$、$Q_u$和$Q_{\Delta u}$分别为状态跟踪、控制跟踪和控制平滑权重矩阵，$\rho_o$为避障惩罚权重，$\eta$为安全距离调节权重，$\mathcal{I}_{k}$表示预测步$k$中被选入优化问题的近邻障碍点集合。目标函数前三项用于保持局部轨迹跟随全局参考路径并减少控制突变，第四项为学习型点级避障正则，最后一项鼓励机器人在空间允许时保持更大的安全距离。
 
-其中，$a$、$b$、$c$为障碍物3D包围盒的最小椭球主轴的半长，$x$、$y$、$z$为机器人坐标与障碍物质心之间沿三轴的相对位置。
-\section{控制器设计}
-获得局部路径后，还需设计控制器控制移动机器人精确跟踪局部路径，确保机器移动到目标点。控制器作为实现精确运动控制和
-路径规划任务的核心环节，其设计基于反馈控制理论，并结合了比例-积分-微分
-(Proportional-Integral-Derivative,PID) 控制算法，旨在实现对移动机器人位置的精确控制。
-由于机器人采用了全向轮设计，能够同时实现$x$轴和$y$轴方向的独立运动，因
-此在控制器设计中可以分别针对轴和轴设计独立的控制器。
-
-控制器的主要目标是根据局部规划路径以及机器人的当前位置动态调整其运
-动速度，使其能够实现局部路径的精确跟踪，到达目标终点。
-假设当前机器人坐标为$P_c$，目标点（局部路径起点）为$P_g$，全局路径终点为$P_{end}$。
-通过设置检测阈值$\lambda$来判断机器人是否到达终点，
-当$|{P_c} - {P_{end}}| > \lambda $时，系统将选取下一个局部路径坐标点作为控制器的目标点；反之则认为机器人到达终点，控制器停止工作。
-通过这种动态目标点选取机制，控制器能够实时调整机器人的运动状态，确保其沿
-着规划路径精确移动。
-
-对于$x$轴和$y$轴方向上的速度采用前馈+PID控制，其控制率表示如下：
+点级避障函数定义为
 \begin{equation}
-	{u_x}(t) = {K_{{f_x}}}{v_x(t)} + {K_{{p_x}}}{e_x}(t) + {K_{{i_x}}}\int_0^t {{e_x}} (\tau )d\tau  + {K_{{d_x}}}\frac{{d{e_x}(t)}}{{dt}}
+	I_{k,i}
+	=
+	\hat d_{k,i}
+	-
+	d_k,
+	\label{eq:点级避障函数}
+\end{equation}
+当$I_{k,i}\geq0$时，表示预测状态$\mathbf{s}_k$相对第$i$个障碍点满足当前安全距离要求；当$I_{k,i}<0$时，式~\ref{eq:学习增强MPC目标函数}中的惩罚项增大，促使优化器调整轨迹、增大绕行距离或降低速度。与式~\ref{eq:椭圆包络避障约束}相比，式~\ref{eq:点级避障函数}不要求将非凸障碍物拟合为单个凸包络，因此可以在狭窄通道中保留更多真实可行空间。
+
+学习增强MPC的约束条件为
+\begin{align}
+	&\mathbf{s}_{0}=\mathbf{s}(t),
+	\label{eq:MPC初始状态约束}\\
+	&\mathbf{s}_{k+1}=A_k\mathbf{s}_{k}+B_k\mathbf{u}_{k}+\mathbf{c}_k,
+	\quad k=0,\ldots,N-1,
+	\label{eq:MPC动力学约束}\\
+	&\mathbf{u}_{\min}\leq\mathbf{u}_{k}\leq\mathbf{u}_{\max},
+	\quad k=0,\ldots,N-1,
+	\label{eq:MPC控制限幅}\\
+	&\Delta\mathbf{u}_{\min}
+	\leq
+	\mathbf{u}_{k}-\mathbf{u}_{k-1}
+	\leq
+	\Delta\mathbf{u}_{\max},
+	\quad k=1,\ldots,N-1,
+	\label{eq:MPC控制增量约束}\\
+	&d_{\min}\leq d_k\leq d_{\max},
+	\quad k=0,\ldots,N-1.
+	\label{eq:MPC安全距离约束}
+\end{align}
+式~\ref{eq:MPC初始状态约束}保证预测轨迹从机器人当前状态出发；式~\ref{eq:MPC动力学约束}保证轨迹满足底盘运动模型；式~\ref{eq:MPC控制限幅}和式~\ref{eq:MPC控制增量约束}分别限制速度幅值和控制变化率；式~\ref{eq:MPC安全距离约束}使安全距离在可控范围内自适应调节。对于宽阔区域，优化器可选择较大的$d_k$获得更保守的避障行为；对于狭窄通道，$d_k$可在$d_{\min}$以上适当减小，以避免固定安全距离过大导致通道被误判为不可通行。
+
+\begin{figure}[!htb]
+	\centering
+	\includegraphics[width=1.0\textwidth]{pic/学习增强MPC滚动优化流程图.pdf}
+	\caption{学习增强MPC滚动优化闭环流程}
+	\label{fig:学习增强MPC滚动优化闭环流程}
+\end{figure}
+
+学习增强MPC局部规划器的在线求解流程如算法~\ref{alg:学习增强MPC局部规划器}所示。规划器先从全局路径中截取预测时域内的参考状态序列，再将实时点云、聚类边界点和包围盒采样点统一转换为障碍点集，并对动态障碍点进行短时预测。随后，规划器将预测点流变换到机器人局部坐标系，利用距离特征编码器得到点级距离特征，并将其嵌入MPC目标函数在线求解。
+
+\begin{algorithm}[H]
+	\SetAlgoNoEnd
+	\KwIn{机器人当前状态$\mathbf{s}(t)$，全局路径$Path_g$，局部地图$\mathcal{M}_l$，障碍物检测与跟踪结果$\mathcal{O}_t$}
+	\KwOut{局部最优轨迹$Path_l$，控制指令$\mathbf{u}_{0}^{*}$}
+	从$Path_g$中选取距离$\mathbf{s}(t)$最近的路径点，并向前重采样得到$\mathbf{s}_{0:N}^{\mathrm{ref}}$\\
+	由$\mathcal{M}_l$、点云聚类结果和包围盒边界采样生成障碍点集$\mathcal{P}_t$\\
+	根据动态障碍物状态估计生成点速度$\mathbf{v}_{t}^{i}$，未知速度点置零\\
+	初始化名义状态序列$\bar{\mathbf{s}}_{0:N}$和名义控制序列$\bar{\mathbf{u}}_{0:N-1}$\\
+	\For{$l=1,\ldots,K_{\max}$}{
+		依据式~\ref{eq:预测点流}生成预测点流$\mathbf{p}_{k|t}^{i}$\\
+		依据式~\ref{eq:障碍点坐标变换}将预测点流转换到机器人局部坐标系\\
+		利用式~\ref{eq:潜在距离特征编码}计算$\hat d_{k,i}$、$\boldsymbol{\mu}_{k,i}$和$\boldsymbol{\lambda}_{k,i}$\\
+		按距离和参考路径相关性选取近邻障碍点集合$\mathcal{I}_{k}$\\
+		构造式~\ref{eq:学习增强MPC目标函数}至式~\ref{eq:MPC安全距离约束}所示优化问题并求解\\
+		更新$\bar{\mathbf{s}}_{0:N}$和$\bar{\mathbf{u}}_{0:N-1}$\\
+		\If{状态序列和控制序列变化量小于阈值}{
+			\textbf{break}\\
+		}
+	}
+	$Path_l\gets\mathbf{s}_{0:N}^{*}$，$\mathbf{u}_{0}^{*}\gets$最优控制序列首项\\
+	\Return{$Path_l,\mathbf{u}_{0}^{*}$}
+	\caption{学习增强MPC局部规划器}
+	\label{alg:学习增强MPC局部规划器}
+\end{algorithm}
+
+算法~\ref{alg:学习增强MPC局部规划器}中的迭代过程体现了局部感知和运动优化的双向耦合：规划器先根据名义轨迹预测障碍点在机器人局部坐标系中的分布，再根据点级避障特征更新轨迹；更新后的轨迹又会改变下一轮点流坐标变换和避障特征。实际部署时，$K_{\max}$不宜过大，可结合控制周期设置为较小常数。当局部感知范围内无有效障碍点时，算法退化为带速度和平滑约束的路径跟踪MPC；当障碍点过近且优化问题无法得到可行解时，规划器输出减速或停止指令，并等待下一周期感知更新或触发全局重规划。
+
+\section{轨迹跟踪与底层控制接口}
+\subsection{局部目标点选取与平移速度控制}
+局部规划器输出未来$N$步的局部轨迹和首个最优控制量，但实际底盘执行仍需要控制器将规划量转化为连续、稳定的速度指令。本文采用前馈与PID反馈相结合的结构：前馈项直接利用局部规划器给出的期望速度，使机器人快速响应规划轨迹；反馈项根据当前位置与局部目标点之间的误差进行补偿，以抑制定位误差、模型误差和底盘执行误差带来的偏离。
+
+设当前机器人位置为$P_c=[x_c,y_c]^{\mathrm{T}}$，局部轨迹中的跟踪目标点为$P_g=[x_g,y_g]^{\mathrm{T}}$，全局路径终点为$P_{end}$。当$\|P_c-P_{end}\|_2>\lambda$时，控制器从局部轨迹中选取前视距离内的下一个目标点；当$\|P_c-P_{end}\|_2\leq\lambda$时，认为机器人到达任务终点，控制器输出零速度。通过动态目标点选取，控制器能够避免只追踪单个离散点造成频繁启停，同时保持对局部规划轨迹的跟随能力。
+
+对于$x$轴和$y$轴方向上的速度，控制律表示为
+\begin{equation}
+	u_x(t)
+	=
+	K_{f_x}v_x(t)
+	+
+	K_{p_x}e_x(t)
+	+
+	K_{i_x}\int_0^t e_x(\tau)d\tau
+	+
+	K_{d_x}\frac{de_x(t)}{dt},
+	\label{eq:x向速度控制}
 \end{equation}
 \begin{equation}
-	{u_y}(t) = {K_{{f_y}}}{v_y(t)} + {K_{{p_y}}}{e_y}(t) + {K_{{i_y}}}\int_0^t {{e_y}} (\tau )d\tau  + {K_{{d_y}}}\frac{{d{e_y}(t)}}{{dt}}
+	u_y(t)
+	=
+	K_{f_y}v_y(t)
+	+
+	K_{p_y}e_y(t)
+	+
+	K_{i_y}\int_0^t e_y(\tau)d\tau
+	+
+	K_{d_y}\frac{de_y(t)}{dt},
+	\label{eq:y向速度控制}
 \end{equation}
+其中$u_x(t)$和$u_y(t)$为平移速度控制输出，$K_{f_x}$和$K_{f_y}$为前馈增益，$v_x(t)$和$v_y(t)$为局部规划器输出的期望速度，$e_x(t)$和$e_y(t)$为当前位置相对局部目标点的误差，$K_p$、$K_i$和$K_d$分别为比例、积分和微分增益。
 
-其中，$u_x(t)$和$u_x(t)$分别为$x$轴和$y$轴的控制输出，$k_{f_x}$、$k_{f_y}$是前馈增益系数，$v_x(t)$、$v_y(t)$是期望状态的$x$轴和$y$轴方向上的速度，$e_x(t)$和$e_y(t)$分别为$x$轴
-和$y$轴的位置误差（即目标点坐标与移动机器人当前坐标之差），$K_{p_x}$、$K_{i_x}$、$K_{d_x}$ 和
-$K_{p_y}$、$K_{i_y}$、$K_{d_y}$ 分别为$x$轴和$y$轴的比例、积分和微分增益系数。
-
-除了控制$x$、$y$方向上的速度以外，还需进行航向控制生成角速度指令$\omega$，确保机器人朝向与运动目标相匹配。具体控制采用分层决策，数学描述如下：
+\subsection{航向角决策与角速度控制}
+除了平移速度控制，机器人还需要生成角速度指令$\omega$，使底盘朝向与运动目标相匹配。本文采用分层航向决策策略：
 \begin{equation}
-	{\theta _{ref}} = \left\{ {\begin{array}{*{20}{c}}
-	{\arctan 2({v_y(t)},{v_x(t)})}&{||{v_t}|| > 0.1}\\
-	{\arctan 2({e_y(t)},{e_x(t)})}&{||{e_p}|| > 0.1}\\
-	{{\theta _c}}&{otherwise}
-	\end{array}} \right.
+	\theta_{ref}
+	=
+	\left\{
+	\begin{array}{ll}
+	\operatorname{atan2}(v_y(t),v_x(t)), & \|v_t\|_2>v_{\epsilon},\\
+	\operatorname{atan2}(e_y(t),e_x(t)), & \|e_p\|_2>e_{\epsilon},\\
+	\theta_c, & \mathrm{otherwise},
+	\end{array}
+	\right.
+	\label{eq:参考航向角}
 \end{equation}
+其中$v_t=[v_x(t),v_y(t)]^{\mathrm{T}}$为期望速度向量，$e_p=[e_x(t),e_y(t)]^{\mathrm{T}}$为位置误差向量，$v_{\epsilon}$和$e_{\epsilon}$为小量阈值。当期望速度较大时，控制器采用速度方向作为参考航向；当期望速度较低但位置误差仍明显时，采用目标点方向作为参考航向；当二者都较小时，维持当前航向$\theta_c$以避免不必要的旋转抖动。
 
-其中，${v_t} = [\begin{array}{*{20}{c}}{{v_x}}&{{v_y}}\end{array}]$为期望速度向量，${e_p} = [\begin{array}{*{20}{c}}{{e_x}(t)}&{{e_y}(t)}\end{array}]$为误差向量，当期望目标点速度$||{{\dot v}_t}||>0.1$时，采用速度向量方向作为参考航向，优先保证运动方向与目标速度方向一致；
-当期望目标点速度较低但位置误差$||{e_p}|| > 0.1$时，采用位置误差方向作为参考航向，确保机器人朝向目标点；
-当期望速度和位置误差都较小时，维持当前航向$\theta_c$，避免不必要的旋转震荡。
-
-角速度指令合成采用PD控制加前馈补偿：
+航向误差应保留方向符号，并映射到$[-\pi,\pi)$范围内：
 \begin{equation}
-	\omega  = {K_{p_{\omega}}}{e_{\theta}(t)} + {K_{d_{\omega}}}\frac{{d{e_{\theta}(t) }}}{{dt}} + {u_{{ff}}}
+	e_{\theta}(t)
+	=
+	\operatorname{wrap}
+	\left(
+	\theta_{ref}-\theta_c
+	\right).
+	\label{eq:航向误差}
 \end{equation}
-
+角速度指令采用PD控制加非线性前馈补偿：
 \begin{equation}
-	{u_{{ff}}} = \left\{ {\begin{array}{*{20}{l}}
-	{{\mathop{\rm sgn}} ({e_\theta })}&{|{e_\theta }| > 0.3{\mkern 1mu} {\rm{rad}}}\\
-	0&{{{otherwise}}}
-	\end{array}} \right.
+	\omega(t)
+	=
+	K_{p_{\omega}}e_{\theta}(t)
+	+
+	K_{d_{\omega}}\frac{de_{\theta}(t)}{dt}
+	+
+	u_{ff},
+	\label{eq:角速度控制}
 \end{equation}
+\begin{equation}
+	u_{ff}
+	=
+	\left\{
+	\begin{array}{ll}
+	K_{ff}\operatorname{sgn}(e_{\theta}), & |e_{\theta}|>\theta_{\epsilon},\\
+	0, & \mathrm{otherwise}.
+	\end{array}
+	\right.
+	\label{eq:角速度前馈}
+\end{equation}
+其中$K_{p_{\omega}}$和$K_{d_{\omega}}$分别为角速度比例和微分增益，$K_{ff}$为前馈补偿系数，$\theta_{\epsilon}$为航向误差阈值。相比直接使用$|\theta_c-\theta_{ref}|$作为误差，式~\ref{eq:航向误差}能够保留旋转方向，避免机器人在跨越$\pm\pi$边界时出现错误转向。
 
-其中，$e_{\theta}=|{\theta}_c-{\theta}_ref|$表示航向误差，$K_{p_{\omega}}$、$K_{d_{\omega}}$分别为角速度的比例和微分增益，$u_{ff}$为非线性前馈项。
+\section{本章小结}
+本章面向变电站运维机器人在设备密集、通道狭窄和动态障碍物扰动条件下的自主导航需求，设计了分层路径规划与学习增强局部避障方法。首先，构建了目标偏向RRT全局规划器，通过地图复杂度评价实现直连模式与RRT模式切换，并结合线段碰撞检测、超时回退和路径平滑校验机制生成可供局部规划器跟踪的全局参考路径。其次，针对传统包络约束MPC在非凸障碍物场景中的保守性问题，引入点级障碍表示和学习型距离特征，将障碍物边界信息转化为可嵌入滚动优化的避障正则项，形成学习增强MPC局部规划器。最后，设计了前馈与PID反馈结合的底层轨迹跟踪控制器，并修正航向角误差计算方式，使局部规划结果能够稳定转化为全向移动底盘可执行的速度指令。
 
-
-\section{NeuPAN规划器设计}
-前述传统MPC方法只能处理凸集的障碍物约束，例如通过聚类将障碍物点云封装成AABB包围盒或者椭圆，然后在MPC中作为约束进行显式求解。
-对于非凸障碍物只能包络成凸障碍进行处理，在这个过程中由于误差传播会产生较大损失导致避障规划精度下降。
+本章内容为后续仿真与实机实验提供算法基础。实验部分将围绕全局规划耗时、路径长度、平滑性、局部避障成功率、最小安全距离和轨迹跟踪误差等指标，对所提方法在不同变电站典型场景下的有效性进行验证。
