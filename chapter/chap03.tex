@@ -1,5 +1,8 @@
-\chapter{基础知识}
-\section{坐标系变换}
+\chapter{多传感器标定与坐标变换基础}
+变电站运维机器人搭载激光雷达、双目深度相机和惯性测量单元等多类传感器，各传感器安装位置不同、成像原理各异，其原始数据分布在互不相同的坐标系中。要将这些异构观测融合到统一的空间基准下，供后续定位建图、障碍物检测和路径规划使用，必须先解决两个基础问题：一是明确各坐标系的定义及其相互变换关系，二是通过标定确定传感器的成像参数与安装位姿。本章围绕这两个问题展开：首先介绍机器人导航涉及的坐标系及其齐次变换关系，为多源数据的空间统一提供数学工具；随后以双目深度相机为对象，阐述针孔成像模型、镜头畸变模型与张正友标定法原理，并给出本文相机平台的内参标定实现，为深度图像转点云等后续处理奠定基础。
+
+\section{坐标系与空间变换基础}
+\label{sec:coord_transform}
 在机器人设备上需要根据实际需求在不同位置安装不同类型的传感器。在机器人导航过程中，需要快速将不同传感器采集的数据在相同的坐标系
 统下进行处理，在机器人导航控制中，需将机器人在本地坐标系中的位置映射到世界坐
 标系，将雷达采集到的点云映射到世界坐标系，方便进行机器人运动轨迹的规划；在视觉目标检测中，需要将相机坐标系中的位
@@ -65,6 +68,152 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
 \end{equation}
 
 等价于先绕原X轴旋转-90°，再绕新Y轴旋转90°的复合旋转。
+
+\section{双目视觉成像模型与内参标定}
+上一节给出了相机坐标系与世界坐标系之间的刚体变换关系，但要将相机采集的二维图像与三维空间点建立联系，还需引入相机的成像模型，并通过标定确定模型中的内部参数。本文选用的Gemini335L双目深度相机由左右两个红外相机和一个RGB相机组成，其深度图像在左红外相机坐标系下生成。深度图像转点云、视觉目标测距等处理均依赖准确的相机内参。本节首先介绍针孔相机成像模型和镜头畸变模型，随后阐述张正友标定法的基本原理，最后给出本文双目深度相机的内参标定实现与结果。
+
+\subsection{针孔相机成像模型}
+针孔相机模型是描述三维空间点如何投影到二维图像平面的经典几何模型，它将复杂的透镜成像过程简化为光线经过单一光心的理想投影。如图~\ref{fig:针孔相机成像模型}所示，设相机坐标系${\cal F}_c$的原点位于光心$O_c$，$Z_c$轴沿光轴指向相机前方，$X_c$、$Y_c$轴分别与图像的行、列方向对齐。空间中任意一点$P$在相机坐标系下的坐标为$(X_c, Y_c, Z_c)$，其与光心的连线交成像平面于像点$p$。
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.85\textwidth]{pic/针孔相机成像模型.pdf}
+    \caption{针孔相机成像模型}
+    \label{fig:针孔相机成像模型}
+\end{figure}
+
+根据相似三角形关系，空间点$P$在归一化成像平面（$Z_c=1$）上的投影坐标为$(X_c/Z_c,\ Y_c/Z_c)$。考虑焦距$f$与像素物理尺寸后，投影点在像素坐标系下的坐标$(u,v)$可由下式给出：
+\begin{equation}
+    Z_c
+    \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
+    =
+    \begin{bmatrix}
+        f_x & 0   & c_x \\
+        0   & f_y & c_y \\
+        0   & 0   & 1
+    \end{bmatrix}
+    \begin{bmatrix} X_c \\ Y_c \\ Z_c \end{bmatrix}
+    = K
+    \begin{bmatrix} X_c \\ Y_c \\ Z_c \end{bmatrix},
+    \label{eq:pinhole_projection}
+\end{equation}
+其中$K$称为相机内参矩阵，$f_x$、$f_y$为以像素为单位的等效焦距（等于物理焦距与像素在$u$、$v$方向物理尺寸之比），$c_x$、$c_y$为主点坐标，即光轴与成像平面交点在像素坐标系下的位置。内参矩阵$K$仅由相机自身光学结构决定，与相机在空间中的位姿无关，因此可以通过离线标定一次性确定。
+
+式~\eqref{eq:pinhole_projection}描述的是理想针孔投影，其逆过程即由像素坐标和深度值反求空间点：给定像点$(u,v)$及其对应深度$Z_c$，可由内参矩阵反投影得到该点在相机坐标系下的三维坐标
+\begin{equation}
+    X_c = \frac{(u-c_x)Z_c}{f_x},
+    \quad
+    Y_c = \frac{(v-c_y)Z_c}{f_y},
+    \quad
+    Z_c = Z_c.
+    \label{eq:pinhole_backprojection}
+\end{equation}
+式~\eqref{eq:pinhole_backprojection}正是深度图像转点云的理论基础，其精度直接依赖于内参$f_x$、$f_y$、$c_x$、$c_y$的标定质量。
+
+\subsection{镜头畸变模型}
+理想针孔模型假设光线严格沿直线经过光心，但实际相机采用透镜组成像，透镜的加工误差和装配偏差会使成像光线偏离理想路径，导致图像产生几何畸变。畸变主要分为径向畸变和切向畸变两类。
+
+径向畸变由透镜表面曲率误差引起，表现为图像点沿径向方向偏离理想位置，越靠近图像边缘偏差越大，直观上使直线在图像边缘发生弯曲，形成桶形畸变或枕形畸变。切向畸变由透镜与成像平面不严格平行（装配偏心）引起，使图像点沿切向方向发生偏移。图~\ref{fig:镜头畸变示意图}以规则网格为例，直观展示了理想无畸变、径向畸变和切向畸变三种情形下的成像效果。
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=\textwidth]{pic/镜头畸变示意图.pdf}
+    \caption{镜头畸变示意图}
+    \label{fig:镜头畸变示意图}
+\end{figure}
+
+设归一化成像平面上的理想坐标为$(x,y)$，其到主点的径向距离为$r^2=x^2+y^2$。采用Brown-Conrady模型\textsuperscript{\cite{Brown1971Distortion}}，畸变后的坐标$(x_d,y_d)$可表示为
+\begin{equation}
+\begin{aligned}
+    x_d &= x\underbrace{(1+k_1 r^2 + k_2 r^4 + k_3 r^6)}_{\text{径向畸变}} + \underbrace{2p_1 xy + p_2(r^2+2x^2)}_{\text{切向畸变}}, \\
+    y_d &= y(1+k_1 r^2 + k_2 r^4 + k_3 r^6) + p_1(r^2+2y^2) + 2p_2 xy,
+\end{aligned}
+    \label{eq:distortion_model}
+\end{equation}
+其中$k_1$、$k_2$、$k_3$为径向畸变系数，$p_1$、$p_2$为切向畸变系数。对于本文使用的普通视场相机，径向畸变以低阶项为主，通常取$k_1$、$k_2$，并保留$p_1$、$p_2$即可满足精度要求，即畸变系数向量为$D=[k_1, k_2, p_1, p_2]$。将畸变后的归一化坐标$(x_d,y_d)$代入式~\eqref{eq:pinhole_projection}的内参映射，即可得到实际成像的像素坐标。因此，完整的相机标定需要同时求解内参矩阵$K$和畸变系数$D$。
+
+\subsection{张正友标定法原理}
+相机标定的目标是由若干组已知的空间点与其对应像素点，反求内参矩阵$K$和畸变系数$D$。张正友于2000年提出的平面标定法\textsuperscript{\cite{Zhang2000Calib}}因其只需一张平面棋盘格标定板、操作灵活且精度较高，成为目前应用最广泛的相机标定方法，本文即采用该方法完成相机内参标定。
+
+该方法的核心思想是利用平面标定板提供的已知几何约束。将棋盘格所在平面设为世界坐标系的$Z=0$平面，则平面上任意角点的世界坐标可写为$(X, Y, 0)$。此时空间点到像素点的映射退化为一个平面到平面的单应性变换：
+\begin{equation}
+    s
+    \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
+    = K
+    \begin{bmatrix} \mathbf{r}_1 & \mathbf{r}_2 & \mathbf{t} \end{bmatrix}
+    \begin{bmatrix} X \\ Y \\ 1 \end{bmatrix}
+    = H
+    \begin{bmatrix} X \\ Y \\ 1 \end{bmatrix},
+    \label{eq:homography}
+\end{equation}
+其中$\mathbf{r}_1$、$\mathbf{r}_2$为旋转矩阵的前两列，$\mathbf{t}$为平移向量，$s$为尺度因子，$H=K[\mathbf{r}_1\ \mathbf{r}_2\ \mathbf{t}]$即为$3\times3$的单应性矩阵。对于每张标定图像，可由检测到的角点世界坐标与像素坐标估计出对应的单应性矩阵$H$。
+
+利用旋转矩阵列向量的正交归一性质，即$\mathbf{r}_1^{T}\mathbf{r}_2=0$且$\|\mathbf{r}_1\|=\|\mathbf{r}_2\|=1$，可由$H=[\mathbf{h}_1\ \mathbf{h}_2\ \mathbf{h}_3]$导出关于内参的约束方程：
+\begin{equation}
+    \mathbf{h}_1^{T}\mathbf{B}\,\mathbf{h}_2 = 0,
+    \quad
+    \mathbf{h}_1^{T}\mathbf{B}\,\mathbf{h}_1 = \mathbf{h}_2^{T}\mathbf{B}\,\mathbf{h}_2,
+    \label{eq:zhang_constraint}
+\end{equation}
+其中$\mathbf{B}=K^{-T}K^{-1}$为对称矩阵，仅含内参信息。每张标定图像提供两个约束方程，当图像数量不少于三张时即可线性求解$\mathbf{B}$，进而通过Cholesky分解恢复内参矩阵$K$的闭式初值，并由$K$反解出各图像对应的外参$[\mathbf{r}_1\ \mathbf{r}_2\ \mathbf{t}]$。
+
+上述闭式解未考虑镜头畸变，且受角点检测噪声影响。因此，标定的最后一步是以闭式解为初值，将所有内参、畸变系数和各图像外参作为优化变量，通过最小化重投影误差进行非线性优化（Levenberg-Marquardt算法）：
+\begin{equation}
+    \min_{K,D,\{R_i,\mathbf{t}_i\}}
+    \sum_{i=1}^{n}\sum_{j=1}^{m}
+    \left\|
+    \mathbf{p}_{ij} - \hat{\mathbf{p}}\left(K, D, R_i, \mathbf{t}_i, \mathbf{P}_j\right)
+    \right\|_2^2,
+    \label{eq:reprojection_error}
+\end{equation}
+其中$n$为图像数量，$m$为每张图像的角点数量，$\mathbf{p}_{ij}$为实际检测到的角点像素坐标，$\hat{\mathbf{p}}(\cdot)$为将第$j$个角点世界坐标$\mathbf{P}_j$按当前参数投影得到的预测像素坐标。式~\eqref{eq:reprojection_error}的目标函数值开方后即为重投影误差（RMS，单位为像素），是衡量标定质量的核心指标：其值越小，说明标定参数越准确。
+
+\subsection{双目深度相机内参标定实现}
+基于上述原理，本文对Gemini335L双目深度相机的红外相机流进行内参标定。由于深度图像与左红外相机同源，标定红外相机得到的内参可直接用于深度图像反投影，故本文以红外相机流（分辨率$1280\times720$）作为标定对象。标定采用calib.io生成的$9\times12$方格棋盘格标定板，内角点数为$11\times8$，单格边长为$20\,\mathrm{mm}$（打印后经实测校准），标定算法基于OpenCV实现的张正友标定法。
+
+标定图像采集遵循以下原则以保证参数可辨识性：在近（约$0.5\,\mathrm{m}$）、中（约$1\,\mathrm{m}$）、远（约$1.5\sim2\,\mathrm{m}$）不同距离下拍摄，使标定板深度跨度大于$0.5\,\mathrm{m}$，避免焦距欠定；变换标定板的倾斜角度（左右倾、上下倾、正对）以提供充分的姿态约束；使标定板分别出现在图像的中心、边缘和角落，以覆盖存在畸变的视场区域。共采集$20\sim30$张有效图像，部分采集样本如图~\ref{fig:红外相机标定图像采集}所示。
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=\textwidth]{pic/红外相机标定图像采集.pdf}
+    \caption{红外相机标定图像采集样本}
+    \label{fig:红外相机标定图像采集}
+\end{figure}
+
+标定流程为：对每张图像检测棋盘格内角点并进行亚像素级精化，剔除角点检测失败或重投影误差异常偏大的图像，随后按式~\eqref{eq:zhang_constraint}求解内参闭式初值，最后通过式~\eqref{eq:reprojection_error}的非线性优化得到最终的内参矩阵与畸变系数。标定结果如表~\ref{tab:camera_intrinsic}所示。
+
+\begin{table}[!htb]
+    \centering
+    \caption{红外相机内参标定结果}
+    \label{tab:camera_intrinsic}
+    \renewcommand{\arraystretch}{1.4}
+    \begin{tabularx}{0.9\textwidth}{>{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X}
+        \toprule[1.2pt]
+        \textbf{参数类别} & \textbf{符号} & \textbf{标定值} \\
+        \midrule
+        \multirow{4}{*}{内参}
+        & $f_x$ & 769.70 \\
+        & $f_y$ & 777.24 \\
+        & $c_x$ & 634.96 \\
+        & $c_y$ & 392.73 \\
+        \midrule
+        \multirow{4}{*}{畸变系数}
+        & $k_1$ & 0.1181 \\
+        & $k_2$ & $-0.1832$ \\
+        & $p_1$ & $-0.0015$ \\
+        & $p_2$ & 0.0006 \\
+        \midrule
+        重投影误差 & RMS & 0.29\,px \\
+        \bottomrule[1.2pt]
+    \end{tabularx}
+\end{table}
+
+标定得到的重投影误差RMS为$0.29\,\mathrm{px}$，小于$0.5\,\mathrm{px}$，属于优秀标定质量，满足深度图像转点云对内参精度的要求。将表~\ref{tab:camera_intrinsic}中的内参$f_x$、$f_y$、$c_x$、$c_y$代入式~\eqref{eq:pinhole_backprojection}，即可将深度相机输出的每个有效深度像素反投影为相机坐标系下的三维点，再结合第~\ref{sec:coord_transform}节所述相机到机体、机体到世界坐标系的变换关系，最终得到统一坐标系下的三维点云，为后续障碍物检测与环境建图提供数据基础。
+
+%% ======================================================================
+%% TODO: 以下"聚类算法概述"整节（含K-Means与DBSCAN）后续移至第5章。
+%% 暂时保留在此以维持文档可编译，迁移时可整段剪切。
+%% ======================================================================
 \section{聚类算法概述}
 聚类算法是一类无监督的学习技术，目的是将数据集中的样本划分为若干簇。核心目标是使得同一簇的样本在特征空间上尽可能接近，不同簇的样本在特征空间上尽可能远离，而且无需预先标记数据，可以自动发现数据内在结构。
 换句话说，聚类是将数据分组为多个聚类，一个聚类中的组具有最大相似度，而聚类之间的数据具有最小相似度的过程。目前，聚类算法广泛应用在计算机视觉、图像分割、异常检测等领域。本文详细介绍两种聚类算法，分别是
