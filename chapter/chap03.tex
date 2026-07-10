@@ -169,7 +169,7 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
 其中$n$为图像数量，$m$为每张图像的角点数量，$\mathbf{p}_{ij}$为实际检测到的角点像素坐标，$\hat{\mathbf{p}}(\cdot)$为将第$j$个角点世界坐标$\mathbf{P}_j$按当前参数投影得到的预测像素坐标。式~\eqref{eq:reprojection_error}的目标函数值开方后即为重投影误差（RMS，单位为像素），是衡量标定质量的核心指标：其值越小，说明标定参数越准确。
 
 \subsection{双目深度相机内参标定实现}
-基于上述原理，本文对Gemini335L双目深度相机的红外相机流进行内参标定。由于深度图像与左红外相机同源，标定红外相机得到的内参可直接用于深度图像反投影，故本文以红外相机流（分辨率$1280\times720$）作为标定对象。标定采用calib.io生成的$9\times12$方格棋盘格标定板，内角点数为$11\times8$，单格边长为$20\,\mathrm{mm}$（打印后经实测校准），标定算法基于OpenCV实现的张正友标定法。
+基于上述原理，本文对Gemini335L双目深度相机的红外相机流进行内参标定。由于深度图像与左红外相机同源、同分辨率，标定红外相机得到的内参可直接用于深度图像反投影，故本文以红外相机流（分辨率$640\times480$）作为标定对象。标定采用calib.io生成的$9\times12$方格棋盘格标定板，内角点数为$11\times8$，单格边长为$20\,\mathrm{mm}$（打印后经实测校准），标定算法基于OpenCV实现的张正友标定法。
 
 标定图像采集遵循以下原则以保证参数可辨识性：在近（约$0.5\,\mathrm{m}$）、中（约$1\,\mathrm{m}$）、远（约$1.5\sim2\,\mathrm{m}$）不同距离下拍摄，使标定板深度跨度大于$0.5\,\mathrm{m}$，避免焦距欠定；变换标定板的倾斜角度（左右倾、上下倾、正对）以提供充分的姿态约束；使标定板分别出现在图像的中心、边缘和角落，以覆盖存在畸变的视场区域。共采集$20\sim30$张有效图像，部分采集样本如图~\ref{fig:红外相机标定图像采集}所示。
 
@@ -192,10 +192,10 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
         \textbf{参数类别} & \textbf{符号} & \textbf{标定值} \\
         \midrule
         \multirow{4}{*}{内参}
-        & $f_x$ & 769.70 \\
-        & $f_y$ & 777.24 \\
-        & $c_x$ & 634.96 \\
-        & $c_y$ & 392.73 \\
+        & $f_x$ & 394.25 \\
+        & $f_y$ & 397.77 \\
+        & $c_x$ & 320.40 \\
+        & $c_y$ & 232.10 \\
         \midrule
         \multirow{4}{*}{畸变系数}
         & $k_1$ & 0.1181 \\
@@ -203,12 +203,171 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
         & $p_1$ & $-0.0015$ \\
         & $p_2$ & 0.0006 \\
         \midrule
-        重投影误差 & RMS & 0.29\,px \\
+        重投影误差 & RMS & 0.28\,px \\
         \bottomrule[1.2pt]
     \end{tabularx}
 \end{table}
 
-标定得到的重投影误差RMS为$0.29\,\mathrm{px}$，小于$0.5\,\mathrm{px}$，属于优秀标定质量，满足深度图像转点云对内参精度的要求。将表~\ref{tab:camera_intrinsic}中的内参$f_x$、$f_y$、$c_x$、$c_y$代入式~\eqref{eq:pinhole_backprojection}，即可将深度相机输出的每个有效深度像素反投影为相机坐标系下的三维点，再结合第~\ref{sec:coord_transform}节所述相机到机体、机体到世界坐标系的变换关系，最终得到统一坐标系下的三维点云，为后续障碍物检测与环境建图提供数据基础。
+标定得到的重投影误差RMS为$0.28\,\mathrm{px}$，小于$0.5\,\mathrm{px}$，属于优秀标定质量，满足深度图像转点云对内参精度的要求。将表~\ref{tab:camera_intrinsic}中的内参$f_x$、$f_y$、$c_x$、$c_y$代入式~\eqref{eq:pinhole_backprojection}，即可将深度相机输出的每个有效深度像素反投影为相机坐标系下的三维点，再结合第~\ref{sec:coord_transform}节所述相机到机体、机体到世界坐标系的变换关系，最终得到统一坐标系下的三维点云，为后续障碍物检测与环境建图提供数据基础。
+
+\section{多传感器外参与静态坐标变换}
+\label{sec:extrinsic}
+上一节完成了相机内参标定，解决了单个相机内部的成像参数问题。然而，机器人搭载的激光雷达与深度相机分别安装在本体的不同位置，各自在独立的坐标系下输出数据。要将多源数据融合到统一的机体坐标系，还需确定各传感器坐标系与机体坐标系之间的刚体变换关系，即传感器外参。本节首先概述外参标定问题及常用方法，随后说明本文采用的基于机械安装尺寸的静态坐标变换配置方案，最后介绍ROS~2的TF坐标变换树及其在本文中的应用。
+
+\subsection{外参标定问题概述}
+传感器外参描述的是传感器坐标系相对于参考坐标系（通常为机器人本体坐标系）的位姿，由一个旋转矩阵$R\in SO(3)$和一个平移向量$\mathbf{t}\in\mathbb{R}^{3}$构成，共六个自由度。设某点在传感器坐标系下的坐标为$\mathbf{p}_s$，则其在机体坐标系下的坐标$\mathbf{p}_b$为
+\begin{equation}
+    \mathbf{p}_b = R\,\mathbf{p}_s + \mathbf{t}.
+    \label{eq:extrinsic_transform}
+\end{equation}
+准确的外参是多传感器数据空间对齐的前提，外参误差会直接导致点云错位、地图重影等问题。
+
+确定外参的方法主要有三类：一是基于标定物的离线标定，如利用棋盘格或标定板配合手眼标定（Hand-Eye Calibration）方法，通过求解形如$\mathbf{AX}=\mathbf{XB}$的方程组估计传感器间的相对位姿；二是基于运动或场景的在线自标定，如利用同步定位与建图（SLAM）过程中的点云配准（ICP）或位姿图优化，在线估计并修正外参；三是基于机械安装尺寸的直接测量，即根据传感器在机械结构上的安装位置和朝向，直接计算刚体变换参数。前两类方法精度较高，但依赖专门的标定流程或额外的计算，实现复杂度和调试成本较高。考虑到本文机器人平台的传感器均刚性固定于机械结构上、安装位姿在运行过程中不发生变化，且导航避障任务对外参精度的要求处于中等水平，本文采用第三类方法，即基于机械安装尺寸配置静态坐标变换，兼顾了实现的简洁性与工程的实用性。
+
+\subsection{本文坐标系配置方案}
+本文遵循机器人操作系统的坐标系约定（REP-105），以机器人本体坐标系$\mathrm{base\_link}$作为各传感器数据统一的参考坐标系，其原点位于底盘几何中心，$+X$轴指向机器人前进方向，$+Y$轴指向左侧，$+Z$轴垂直向上。激光雷达和深度相机各自的坐标系通过静态变换挂接到该坐标系下，如图~\ref{fig:传感器安装位置示意图}所示。
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.68\textwidth]{pic/传感器安装位置示意图.pdf}
+    \caption{传感器安装位置示意图（俯视）}
+    \label{fig:传感器安装位置示意图}
+\end{figure}
+
+根据传感器在机械结构上的实测安装位置，各坐标系相对$\mathrm{base\_link}$的外参配置如表~\ref{tab:extrinsic_config}所示。由于传感器在安装时已保证其坐标轴与机体坐标系机械对齐，故旋转部分近似为单位阵（无相对旋转），外参主要体现为平移偏移。其中，Livox~MID-360激光雷达坐标系$\mathrm{livox\_frame}$相对机体中心前移$0.22\,\mathrm{m}$、右移$0.22\,\mathrm{m}$；Gemini335L深度相机坐标系$\mathrm{realsense\_link}$相对机体中心前移$0.275\,\mathrm{m}$。
+
+\begin{table}[!htb]
+    \centering
+    \caption{传感器外参配置}
+    \label{tab:extrinsic_config}
+    \renewcommand{\arraystretch}{1.4}
+    \begin{tabularx}{0.9\textwidth}{>{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X}
+        \toprule[1.2pt]
+        \textbf{传感器坐标系} & \textbf{平移 $(x,y,z)$/m} & \textbf{旋转（欧拉角）} \\
+        \midrule
+        $\mathrm{livox\_frame}$ & $(0.22,\ -0.22,\ 0)$ & $(0,\ 0,\ 0)$ \\
+        $\mathrm{realsense\_link}$ & $(0.275,\ 0,\ 0)$ & $(0,\ 0,\ 0)$ \\
+        \bottomrule[1.2pt]
+    \end{tabularx}
+\end{table}
+
+该方案的优点是配置简单、无需专门的标定设备与流程，且传感器刚性固定后外参保持不变，无需在线估计；其局限在于测量精度受限于测量工具（约$\pm5\,\mathrm{mm}$），且未补偿传感器安装时可能存在的微小角度偏差。对于本文面向的半结构化环境移动机器人导航避障任务，该精度已能满足要求；若后续需要更高精度，可引入前述手眼标定或基于SLAM的在线自标定方法进一步优化。
+
+\subsection{TF坐标变换树}
+在机器人系统中，随着传感器数量增加以及机器人自身的运动，各坐标系之间的变换关系既有静态的（如传感器到机体的固定安装关系），也有动态的（如机体相对地图的实时位姿）。为统一管理这些变换，ROS~2提供了TF（Transform）坐标变换库，以树状结构维护全部坐标系及其父子变换关系，并支持按时间戳查询任意两个坐标系间的变换。本文机器人系统的TF树结构如图~\ref{fig:机器人TF坐标变换树}所示。
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.72\textwidth]{pic/机器人TF坐标变换树.pdf}
+    \caption{机器人TF坐标变换树}
+    \label{fig:机器人TF坐标变换树}
+\end{figure}
+
+TF树以全局地图坐标系$\mathrm{map}$为根节点，向下依次为里程计坐标系$\mathrm{odom}$和机体坐标系$\mathrm{base\_link}$，其中$\mathrm{map}\to\mathrm{odom}\to\mathrm{base\_link}$的变换由第4章的定位建图模块实时发布，属于动态变换；$\mathrm{base\_link}$向下挂接的$\mathrm{livox\_frame}$和$\mathrm{realsense\_link}$两个传感器坐标系，其变换即为表~\ref{tab:extrinsic_config}中配置的外参，通过静态变换发布器一次性发布、运行期间保持不变。数据处理时，各节点只需向TF库查询所需的坐标变换（例如将激光雷达点云由$\mathrm{livox\_frame}$变换到$\mathrm{base\_link}$），即可完成多源数据的空间统一，无需在各节点中硬编码变换参数，提高了系统的模块化程度与可维护性。
+
+\section{深度图像到三维点云的转换}
+\label{sec:depth2cloud}
+深度相机直接输出的是二维深度图像，而障碍物检测与环境建图需要三维点云形式的空间信息。本节介绍如何利用第3.2节标定得到的相机内参，将深度图像转换为三维点云，并统一到机体坐标系下。该处理由ROS~2节点$\mathrm{depth\_to\_pointcloud\_node}$实现，整体流程如图~\ref{fig:深度图转点云流程}所示。
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=\textwidth]{pic/深度图转点云流程.pdf}
+    \caption{深度图像转点云处理流程}
+    \label{fig:深度图转点云流程}
+\end{figure}
+
+\subsection{深度图像数据格式}
+本文使用的Gemini335L深度相机基于双目立体视觉配合红外结构光主动投影生成深度图像，深度图与左红外相机同源、同分辨率（$640\times480$），因此可直接使用第3.2节标定的红外相机内参进行反投影。深度图像以ROS标准图像消息$\mathrm{sensor\_msgs/Image}$发布，编码格式为$\mathrm{16UC1}$，即每个像素以16位无符号整数存储深度值，采用定点数表示（比例因子为$1/10000$），例如像素值5000对应实际深度$0.5\,\mathrm{m}$。像素值为0表示该点深度测量无效，通常由遮挡、目标反射率过低或超出量程等原因造成。
+
+\subsection{深度图像反投影算法}
+深度图像转点云的核心是针孔模型的反投影：对深度图中每个有效像素$(u,v)$及其深度值$d$，按式~\eqref{eq:pinhole_backprojection}计算其在相机坐标系下的三维坐标：
+\begin{equation}
+    X_c = \frac{(u-c_x)\,d}{f_x},
+    \quad
+    Y_c = \frac{(v-c_y)\,d}{f_y},
+    \quad
+    Z_c = d,
+    \label{eq:depth_backproject}
+\end{equation}
+其中$f_x$、$f_y$、$c_x$、$c_y$取自表~\ref{tab:camera_intrinsic}的标定内参。在反投影之前，需先对深度值进行有效性过滤，仅保留满足$d>0$且$d_{\min}<d<d_{\max}$的像素，本文取$d_{\min}=0.3\,\mathrm{m}$、$d_{\max}=5.0\,\mathrm{m}$。这是因为过近的点位于相机盲区、易产生较大误差，过远的点深度精度显著下降且噪声较大，滤除二者可提升点云质量。
+
+反投影得到的点云位于相机光学坐标系下，其坐标轴定义（$+Z$沿光轴向前、$+X$向右、$+Y$向下）与ROS机体坐标系约定不同，需通过固定旋转将其转换到机体坐标系约定的朝向：
+\begin{equation}
+    \mathbf{p}_{\text{body}}
+    =
+    R_{\text{o}\to\text{b}}\,
+    \mathbf{p}_{\text{optical}},
+    \quad
+    R_{\text{o}\to\text{b}}
+    =
+    \begin{bmatrix}
+        0 & 0 & 1 \\
+        -1 & 0 & 0 \\
+        0 & -1 & 0
+    \end{bmatrix}.
+    \label{eq:optical_to_body}
+\end{equation}
+此外，$640\times480$的深度图完整转换将产生约$30$万个点，数据量大、计算负担重。为兼顾精度与实时性，本文采用均匀降采样策略，即每隔$N$个像素取一个点进行反投影，实际取$N=3$，降采样后每帧点数降至约$3$万，处理频率可稳定跟随深度图输入的约$10\,\mathrm{Hz}$。
+
+\subsection{点云的坐标系变换与发布}
+经上述处理得到的点云仍位于相机坐标系$\mathrm{realsense\_link}$下。为供后续多传感器融合使用，需进一步将其变换到机体坐标系。节点向TF库查询$\mathrm{realsense\_link}\to\mathrm{base\_link}$的变换（即第3.3节配置的外参），按式~\eqref{eq:extrinsic_transform}对每个点应用刚体变换，得到机体坐标系下的点云。节点同时对外发布两路点云：一路为相机坐标系下的$\mathrm{/camera/depth/points}$，另一路为机体坐标系下的$\mathrm{/camera/depth/points\_base}$，二者均采用ROS标准点云消息格式$\mathrm{sensor\_msgs/PointCloud2}$。其中，机体坐标系下的点云将与激光雷达点云一同送入下一节的局部体素地图进行融合。深度图转点云节点的关键参数配置如表~\ref{tab:depth_params}所示。
+
+\begin{table}[!htb]
+    \centering
+    \caption{深度图转点云节点参数配置}
+    \label{tab:depth_params}
+    \renewcommand{\arraystretch}{1.4}
+    \begin{tabularx}{0.92\textwidth}{>{\arraybackslash}X >{\centering\arraybackslash}p{3.2cm} >{\arraybackslash}X}
+        \toprule[1.2pt]
+        \textbf{参数} & \textbf{取值} & \textbf{说明} \\
+        \midrule
+        深度比例因子 & $1/10000$ & 16UC1定点数转米 \\
+        有效深度范围 & $0.3\sim5.0$\,m & 过滤盲区与远距噪声 \\
+        降采样间隔 $N$ & 3 & 每隔3像素取1点 \\
+        目标坐标系 & $\mathrm{base\_link}$ & 点云统一坐标系 \\
+        \bottomrule[1.2pt]
+    \end{tabularx}
+\end{table}
+
+\section{多传感器点云融合与局部体素地图}
+\label{sec:voxelmap}
+激光雷达点云与深度相机点云各有优势与盲区：激光雷达测距精度高、视场远，但垂直分辨率有限、近距存在盲区；深度相机在近距范围内点云稠密、可补充低矮障碍信息，但量程短、受光照影响较大。为综合两类传感器的互补优势并抑制各自的噪声，本文将统一到机体坐标系的多源点云融合到一个局部体素地图中，对外提供稳定、去噪的障碍物表示，供后续导航避障使用。该功能由ROS~2节点$\mathrm{local\_voxel\_map\_node}$实现。
+
+\subsection{占据体素地图表示}
+局部体素地图将机器人周围的三维空间离散为边长固定的立方体单元（体素），本文体素边长（分辨率）取$0.05\,\mathrm{m}$，并仅维护机器人周围半径$5\,\mathrm{m}$范围内的体素以控制内存开销。为存储稀疏分布的占据体素，采用哈希表以体素的整数索引为键进行索引，避免稠密三维数组的空间浪费。
+
+每个体素的占据状态采用对数几率（log-odds）表示。设体素被占据的概率为$p$，其对数几率定义为
+\begin{equation}
+    l = \log\frac{p}{1-p}.
+    \label{eq:log_odds}
+\end{equation}
+采用对数几率的优点在于，多次观测的融合只需对$l$进行简单的加减运算，避免了概率形式下的连乘与归一化。当某传感器点云落入某体素时，对该体素累加一个正的观测增益$\Delta l$（命中）：
+\begin{equation}
+    l \leftarrow \mathrm{clamp}(l + \Delta l,\ l_{\min},\ l_{\max}),
+    \label{eq:log_odds_update}
+\end{equation}
+并将$l$限制在$[l_{\min}, l_{\max}]$（本文取$[-2.0, 2.0]$）以防止过度自信。当$l$超过占据阈值（本文取$0$，对应概率$50\%$）时，该体素被判定为占据。
+
+\subsection{分传感器差异化融合策略}
+考虑到不同传感器的可信度与特性差异，本文对激光雷达、深度相机采用差异化的融合参数。激光雷达作为基准传感器，赋予较高的命中增益、较长的时间半衰期和较大的信任距离；深度相机作为近距补盲，赋予中等的命中增益与信任距离；同时对各传感器点云设置不同的高度过滤区间，滤除地面点与过高的无关点。主要融合参数如表~\ref{tab:fusion_params}所示。
+
+\begin{table}[!htb]
+    \centering
+    \caption{分传感器融合参数}
+    \label{tab:fusion_params}
+    \renewcommand{\arraystretch}{1.4}
+    \begin{tabularx}{0.92\textwidth}{>{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X}
+        \toprule[1.2pt]
+        \textbf{传感器} & \textbf{命中增益 $\Delta l$} & \textbf{半衰期/s} & \textbf{信任距离/m} \\
+        \midrule
+        激光雷达 & 0.7 & 5.0 & 8.0 \\
+        深度相机 & 0.5 & 3.0 & 4.0 \\
+        \bottomrule[1.2pt]
+    \end{tabularx}
+\end{table}
+
+\subsection{时间衰减与地图更新}
+为使地图能够反映动态变化的环境（如移动的障碍物离开后原位置应被清空），本文引入基于时间的衰减机制：对于一段时间未被观测更新的体素，按其对应传感器的半衰期对$l$进行指数衰减，并叠加一个负偏移量，使长期未观测的体素的对数几率逐渐减小直至跌破占据阈值，此时将其从哈希表中删除以释放内存。这种以时间衰减代替显式光线投射（raycast）的清除方式，在保证动态障碍及时消除的同时，显著降低了计算开销。地图节点以$10\,\mathrm{Hz}$的频率周期性执行衰减与更新，并将当前所有占据体素的中心点组织为点云，通过话题$\mathrm{/local\_pointcloud}$发布，作为后续导航模块的障碍物观测源。至此，多传感器数据完成了从原始观测到统一、去噪的三维障碍物表示的完整处理，为第5章的障碍物检测与第6章的路径规划提供了数据基础。
 
 %% ======================================================================
 %% TODO: 以下"聚类算法概述"整节（含K-Means与DBSCAN）后续移至第5章。
