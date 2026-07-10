@@ -1,0 +1,79 @@
+{
+  "version": "0.1",
+  "metadata": {
+    "title": "机器人TF坐标变换树",
+    "created_by": "visiomaster.manual",
+    "style_profile": "paper_white",
+    "font_scale": {"frame_title": 15, "body": 13, "small_label": 10}
+  },
+  "page": {
+    "width": 9.0,
+    "height": 6.4,
+    "units": "in",
+    "origin": "top-left",
+    "background": "#FFFFFF"
+  },
+  "nodes": [
+    {"id": "bg", "type": "page_background", "x": 0, "y": 0, "w": 9.0, "h": 6.4},
+    {
+      "id": "map", "type": "rounded_process", "x": 3.0, "y": 0.45, "w": 3.0, "h": 0.85,
+      "text": "map（全局地图坐标系）",
+      "style": {"fill": "#DCE6F4", "line": "#2F5597", "font_size_pt": 13, "rounding_in": 0.14}
+    },
+    {
+      "id": "odom", "type": "rounded_process", "x": 3.0, "y": 1.85, "w": 3.0, "h": 0.85,
+      "text": "odom（里程计坐标系）",
+      "style": {"fill": "#DCE6F4", "line": "#2F5597", "font_size_pt": 13, "rounding_in": 0.14}
+    },
+    {
+      "id": "base", "type": "rounded_process", "x": 3.0, "y": 3.25, "w": 3.0, "h": 0.85,
+      "text": "base_link（机器人本体）",
+      "style": {"fill": "#E7E7E7", "line": "#404040", "font_size_pt": 13, "rounding_in": 0.14, "font_weight": "bold"}
+    },
+    {
+      "id": "jn", "type": "junction_point", "x": 4.44, "y": 4.56, "w": 0.12, "h": 0.12,
+      "style": {"fill": "#404040", "line": "#404040"}
+    },
+    {
+      "id": "livox", "type": "rounded_process", "x": 0.7, "y": 5.05, "w": 3.0, "h": 0.85,
+      "text": "livox_frame（激光雷达）",
+      "style": {"fill": "#DDEEDD", "line": "#548235", "font_size_pt": 13, "rounding_in": 0.14}
+    },
+    {
+      "id": "camera", "type": "rounded_process", "x": 5.3, "y": 5.05, "w": 3.0, "h": 0.85,
+      "text": "camera_link（深度相机）",
+      "style": {"fill": "#FBE5D6", "line": "#C55A11", "font_size_pt": 13, "rounding_in": 0.14}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_map_odom", "type": "arrow_connector", "from": "map", "to": "odom",
+      "route": "vertical", "label": "SLAM（动态）",
+      "style": {"line": "#2F5597", "line_weight_pt": 1.4, "font_size_pt": 10}
+    },
+    {
+      "id": "e_odom_base", "type": "arrow_connector", "from": "odom", "to": "base",
+      "route": "vertical", "label": "里程计（动态）",
+      "style": {"line": "#2F5597", "line_weight_pt": 1.4, "font_size_pt": 10}
+    },
+    {
+      "id": "e_base_jn", "type": "line_segment", "from_point": [4.5, 4.1], "to_point": [4.5, 4.62],
+      "style": {"line": "#404040", "line_weight_pt": 1.4, "end_arrow": "none"}
+    },
+    {
+      "id": "e_base_livox", "type": "arrow_connector", "from": "jn", "to": "livox",
+      "route": "orthogonal", "orthogonalize_points": true,
+      "points": [[4.5, 4.62], [2.2, 4.62], [2.2, 5.05]],
+      "label": "静态TF (0.22,-0.22,0)",
+      "style": {"line": "#548235", "line_weight_pt": 1.4, "font_size_pt": 10}
+    },
+    {
+      "id": "e_base_camera", "type": "arrow_connector", "from": "jn", "to": "camera",
+      "route": "orthogonal", "orthogonalize_points": true,
+      "points": [[4.5, 4.62], [6.8, 4.62], [6.8, 5.05]],
+      "label": "静态TF (0.275,0,0)",
+      "style": {"line": "#C55A11", "line_weight_pt": 1.4, "font_size_pt": 10}
+    }
+  ],
+  "assets": []
+}

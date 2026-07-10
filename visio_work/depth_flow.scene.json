@@ -1,0 +1,55 @@
+{
+  "version": "0.1",
+  "metadata": {
+    "title": "深度图像转点云处理流程",
+    "created_by": "visiomaster.manual",
+    "style_profile": "paper_white",
+    "font_scale": {"body": 12, "small_label": 10}
+  },
+  "page": {
+    "width": 12.6,
+    "height": 3.0,
+    "units": "in",
+    "origin": "top-left",
+    "background": "#FFFFFF"
+  },
+  "nodes": [
+    {"id": "bg", "type": "page_background", "x": 0, "y": 0, "w": 12.6, "h": 3.0},
+    {
+      "id": "s1", "type": "rounded_process", "x": 0.3, "y": 1.0, "w": 2.05, "h": 1.0,
+      "text": "深度图输入\n(16UC1, 640×480)",
+      "style": {"fill": "#DCE6F4", "line": "#2F5597", "font_size_pt": 12, "rounding_in": 0.12}
+    },
+    {
+      "id": "s2", "type": "rounded_process", "x": 2.75, "y": 1.0, "w": 2.05, "h": 1.0,
+      "text": "有效深度过滤\n(0.3~5.0 m)",
+      "style": {"fill": "#DDEEDD", "line": "#548235", "font_size_pt": 12, "rounding_in": 0.12}
+    },
+    {
+      "id": "s3", "type": "rounded_process", "x": 5.2, "y": 1.0, "w": 2.05, "h": 1.0,
+      "text": "针孔反投影\n(内参 fx,fy,cx,cy)",
+      "style": {"fill": "#FBE5D6", "line": "#C55A11", "font_size_pt": 12, "rounding_in": 0.12}
+    },
+    {
+      "id": "s4", "type": "rounded_process", "x": 7.65, "y": 1.0, "w": 2.05, "h": 1.0,
+      "text": "光学系→机体系\n旋转 + 降采样",
+      "style": {"fill": "#DDEEDD", "line": "#548235", "font_size_pt": 12, "rounding_in": 0.12}
+    },
+    {
+      "id": "s5", "type": "rounded_process", "x": 10.1, "y": 1.0, "w": 2.05, "h": 1.0,
+      "text": "TF变换 + 发布\n(base_link 点云)",
+      "style": {"fill": "#DCE6F4", "line": "#2F5597", "font_size_pt": 12, "rounding_in": 0.12}
+    }
+  ],
+  "edges": [
+    {"id": "e1", "type": "lane_arrow", "from": "s1", "to": "s2", "route": "horizontal",
+     "style": {"line": "#333333", "line_weight_pt": 1.4}},
+    {"id": "e2", "type": "lane_arrow", "from": "s2", "to": "s3", "route": "horizontal",
+     "style": {"line": "#333333", "line_weight_pt": 1.4}},
+    {"id": "e3", "type": "lane_arrow", "from": "s3", "to": "s4", "route": "horizontal",
+     "style": {"line": "#333333", "line_weight_pt": 1.4}},
+    {"id": "e4", "type": "lane_arrow", "from": "s4", "to": "s5", "route": "horizontal",
+     "style": {"line": "#333333", "line_weight_pt": 1.4}}
+  ],
+  "assets": []
+}

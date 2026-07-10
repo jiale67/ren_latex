@@ -225,16 +225,9 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
 确定外参的方法主要有三类：一是基于标定物的离线标定，如利用棋盘格或标定板配合手眼标定（Hand-Eye Calibration）方法，通过求解形如$\mathbf{AX}=\mathbf{XB}$的方程组估计传感器间的相对位姿；二是基于运动或场景的在线自标定，如利用同步定位与建图（SLAM）过程中的点云配准（ICP）或位姿图优化，在线估计并修正外参；三是基于机械安装尺寸的直接测量，即根据传感器在机械结构上的安装位置和朝向，直接计算刚体变换参数。前两类方法精度较高，但依赖专门的标定流程或额外的计算，实现复杂度和调试成本较高。考虑到本文机器人平台的传感器均刚性固定于机械结构上、安装位姿在运行过程中不发生变化，且导航避障任务对外参精度的要求处于中等水平，本文采用第三类方法，即基于机械安装尺寸配置静态坐标变换，兼顾了实现的简洁性与工程的实用性。
 
 \subsection{本文坐标系配置方案}
-本文遵循机器人操作系统的坐标系约定（REP-105），以机器人本体坐标系$\mathrm{base\_link}$作为各传感器数据统一的参考坐标系，其原点位于底盘几何中心，$+X$轴指向机器人前进方向，$+Y$轴指向左侧，$+Z$轴垂直向上。激光雷达和深度相机各自的坐标系通过静态变换挂接到该坐标系下，如图~\ref{fig:传感器安装位置示意图}所示。
+本文遵循机器人操作系统的坐标系约定（REP-105），以机器人本体坐标系$\mathrm{base\_link}$作为各传感器数据统一的参考坐标系，其原点位于底盘几何中心，$+X$轴指向机器人前进方向，$+Y$轴指向左侧，$+Z$轴垂直向上。激光雷达和深度相机各自的坐标系通过静态变换挂接到该坐标系下。
 
-\begin{figure}[!htb]
-    \centering
-    \includegraphics[width=0.68\textwidth]{pic/传感器安装位置示意图.pdf}
-    \caption{传感器安装位置示意图（俯视）}
-    \label{fig:传感器安装位置示意图}
-\end{figure}
-
-根据传感器在机械结构上的实测安装位置，各坐标系相对$\mathrm{base\_link}$的外参配置如表~\ref{tab:extrinsic_config}所示。由于传感器在安装时已保证其坐标轴与机体坐标系机械对齐，故旋转部分近似为单位阵（无相对旋转），外参主要体现为平移偏移。其中，Livox~MID-360激光雷达坐标系$\mathrm{livox\_frame}$相对机体中心前移$0.22\,\mathrm{m}$、右移$0.22\,\mathrm{m}$；Gemini335L深度相机坐标系$\mathrm{realsense\_link}$相对机体中心前移$0.275\,\mathrm{m}$。
+根据传感器在机械结构上的实测安装位置，各坐标系相对$\mathrm{base\_link}$的外参配置如表~\ref{tab:extrinsic_config}所示。由于传感器在安装时已保证其坐标轴与机体坐标系机械对齐，故旋转部分近似为单位阵（无相对旋转），外参主要体现为平移偏移。其中，Livox~MID-360激光雷达坐标系$\mathrm{livox\_frame}$相对机体中心前移$0.22\,\mathrm{m}$、右移$0.22\,\mathrm{m}$；Gemini335L深度相机坐标系$\mathrm{camera\_link}$相对机体中心前移$0.275\,\mathrm{m}$。
 
 \begin{table}[!htb]
     \centering
@@ -246,7 +239,7 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
         \textbf{传感器坐标系} & \textbf{平移 $(x,y,z)$/m} & \textbf{旋转（欧拉角）} \\
         \midrule
         $\mathrm{livox\_frame}$ & $(0.22,\ -0.22,\ 0)$ & $(0,\ 0,\ 0)$ \\
-        $\mathrm{realsense\_link}$ & $(0.275,\ 0,\ 0)$ & $(0,\ 0,\ 0)$ \\
+        $\mathrm{camera\_link}$ & $(0.275,\ 0,\ 0)$ & $(0,\ 0,\ 0)$ \\
         \bottomrule[1.2pt]
     \end{tabularx}
 \end{table}
@@ -263,7 +256,7 @@ Z轴沿光轴指向相机前方，X轴指向图像右侧，Y轴指向图像下�
     \label{fig:机器人TF坐标变换树}
 \end{figure}
 
-TF树以全局地图坐标系$\mathrm{map}$为根节点，向下依次为里程计坐标系$\mathrm{odom}$和机体坐标系$\mathrm{base\_link}$，其中$\mathrm{map}\to\mathrm{odom}\to\mathrm{base\_link}$的变换由第4章的定位建图模块实时发布，属于动态变换；$\mathrm{base\_link}$向下挂接的$\mathrm{livox\_frame}$和$\mathrm{realsense\_link}$两个传感器坐标系，其变换即为表~\ref{tab:extrinsic_config}中配置的外参，通过静态变换发布器一次性发布、运行期间保持不变。数据处理时，各节点只需向TF库查询所需的坐标变换（例如将激光雷达点云由$\mathrm{livox\_frame}$变换到$\mathrm{base\_link}$），即可完成多源数据的空间统一，无需在各节点中硬编码变换参数，提高了系统的模块化程度与可维护性。
+TF树以全局地图坐标系$\mathrm{map}$为根节点，向下依次为里程计坐标系$\mathrm{odom}$和机体坐标系$\mathrm{base\_link}$，其中$\mathrm{map}\to\mathrm{odom}\to\mathrm{base\_link}$的变换由第4章的定位建图模块实时发布，属于动态变换；$\mathrm{base\_link}$向下挂接的$\mathrm{livox\_frame}$和$\mathrm{camera\_link}$两个传感器坐标系，其变换即为表~\ref{tab:extrinsic_config}中配置的外参，通过静态变换发布器一次性发布、运行期间保持不变。数据处理时，各节点只需向TF库查询所需的坐标变换（例如将激光雷达点云由$\mathrm{livox\_frame}$变换到$\mathrm{base\_link}$），即可完成多源数据的空间统一，无需在各节点中硬编码变换参数，提高了系统的模块化程度与可维护性。
 
 \section{深度图像到三维点云的转换}
 \label{sec:depth2cloud}
@@ -310,7 +303,7 @@ TF树以全局地图坐标系$\mathrm{map}$为根节点，向下依次为里程�
 此外，$640\times480$的深度图完整转换将产生约$30$万个点，数据量大、计算负担重。为兼顾精度与实时性，本文采用均匀降采样策略，即每隔$N$个像素取一个点进行反投影，实际取$N=3$，降采样后每帧点数降至约$3$万，处理频率可稳定跟随深度图输入的约$10\,\mathrm{Hz}$。
 
 \subsection{点云的坐标系变换与发布}
-经上述处理得到的点云仍位于相机坐标系$\mathrm{realsense\_link}$下。为供后续多传感器融合使用，需进一步将其变换到机体坐标系。节点向TF库查询$\mathrm{realsense\_link}\to\mathrm{base\_link}$的变换（即第3.3节配置的外参），按式~\eqref{eq:extrinsic_transform}对每个点应用刚体变换，得到机体坐标系下的点云。节点同时对外发布两路点云：一路为相机坐标系下的$\mathrm{/camera/depth/points}$，另一路为机体坐标系下的$\mathrm{/camera/depth/points\_base}$，二者均采用ROS标准点云消息格式$\mathrm{sensor\_msgs/PointCloud2}$。其中，机体坐标系下的点云将与激光雷达点云一同送入下一节的局部体素地图进行融合。深度图转点云节点的关键参数配置如表~\ref{tab:depth_params}所示。
+经上述处理得到的点云仍位于相机坐标系$\mathrm{camera\_link}$下。为供后续多传感器融合使用，需进一步将其变换到机体坐标系。节点向TF库查询$\mathrm{camera\_link}\to\mathrm{base\_link}$的变换（即第3.3节配置的外参），按式~\eqref{eq:extrinsic_transform}对每个点应用刚体变换，得到机体坐标系下的点云。节点同时对外发布两路点云：一路为相机坐标系下的$\mathrm{/camera/depth/points}$，另一路为机体坐标系下的$\mathrm{/camera/depth/points\_base}$，二者均采用ROS标准点云消息格式$\mathrm{sensor\_msgs/PointCloud2}$。其中，机体坐标系下的点云将与激光雷达点云一同送入下一节的局部体素地图进行融合。深度图转点云节点的关键参数配置如表~\ref{tab:depth_params}所示。
 
 \begin{table}[!htb]
     \centering
