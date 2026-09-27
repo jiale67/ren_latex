@@ -12,6 +12,6 @@
 *.run.xml
 *.synctex.gz
 *.toc
-
+/final_quality_report.md
 # Generated thesis output
 /main-thesis.pdf
